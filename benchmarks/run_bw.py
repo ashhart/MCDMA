@@ -86,6 +86,8 @@ def program_arguments(config, role, device, gid_index, args):
         argv += ['--payload', args.payload]
     if getattr(args,'dump',None) and role=='responder':
         argv += ['--dump', args.dump]
+    elif getattr(args,'payload',None) and role=='responder':
+        argv += ['--dump', '/dev/null']   # payload mode: landed bytes are real data, not a seeded pattern; skip verifier
     return argv
 
 
