@@ -53,6 +53,7 @@ struct options {
     unsigned bytes, depth, qps, cq_per_qp, repeats, warmup, mtu_bytes, gid_index, timeout_s;
     uint64_t total, max_region, verify_bytes; unsigned psn;
     int initiator; const char *device;
+    const char *payload_path, *dump_path; /* real-payload mode: fill slots from a file, dump landed bytes */
 };
 
 struct remote_info {
@@ -219,6 +220,8 @@ static void parse(struct bench *b,int argc,char **argv) {
         else if (!strcmp(a,"--max-region")) o->max_region=parse_size(v,&ok);
         else if (!strcmp(a,"--timeout")) o->timeout_s=(unsigned)parse_size(v,&ok);
         else if (!strcmp(a,"--psn")) o->psn=(unsigned)parse_size(v,&ok);
+        else if (!strcmp(a,"--payload")) o->payload_path=v;
+        else if (!strcmp(a,"--dump")) o->dump_path=v;
         else usage();
         if (!ok) usage();
     }
@@ -542,9 +545,31 @@ static void build_windows(struct bench *b) {
 static void poison_windows(struct bench *b) {
     for (unsigned i=0;i<b->window_count;++i) memset(b->region+b->windows[i].offset,0xa5,(size_t)b->windows[i].length);
 }
+static unsigned char *g_payload; static uint64_t g_payload_len;
+static void load_payload(struct bench *b) {
+    if (!b->o.payload_path) return;
+    FILE *f=fopen(b->o.payload_path,"rb"); if (!f) fatal("payload_open",errno);
+    fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET); if (n<=0) fatal("payload_empty",0);
+    g_payload=malloc((size_t)n); if (!g_payload) fatal("payload_alloc",0);
+    if (fread(g_payload,1,(size_t)n,f)!=(size_t)n) fatal("payload_read",errno);
+    fclose(f); g_payload_len=(uint64_t)n;
+    msg("PAYLOAD path=%s bytes=%" PRIu64,b->o.payload_path,g_payload_len);
+}
 static void fill_slots(struct bench *b,unsigned trial) {
     const unsigned slots=b->o.qps*b->depth;
+    if (g_payload) { /* slot s carries payload chunk s (mod file), so a whole trial streams the file in order */
+        for (unsigned s=0;s<slots;++s) { uint64_t off=((uint64_t)s*b->o.bytes)%g_payload_len; unsigned char *dst=b->region+(uint64_t)s*b->o.bytes;
+            for (uint64_t done=0;done<b->o.bytes;) { uint64_t take=g_payload_len-off; if (take>b->o.bytes-done) take=b->o.bytes-done; memcpy(dst+done,g_payload+off,(size_t)take); done+=take; off=(off+take)%g_payload_len; } }
+        return; }
     for (unsigned s=0;s<slots;++s) fill_words(b->region+(uint64_t)s*b->o.bytes,b->o.bytes,slot_seed(b->nonce,trial,s),0);
+}
+static void dump_landed(struct bench *b) {
+    if (!b->o.dump_path) return;
+    const uint64_t used=(uint64_t)b->o.qps*b->depth*b->o.bytes;
+    FILE *f=fopen(b->o.dump_path,"wb"); if (!f) fatal("dump_open",errno);
+    if (fwrite(b->region,1,(size_t)used,f)!=(size_t)used) fatal("dump_write",errno);
+    fclose(f);
+    msg("DUMP path=%s bytes=%" PRIu64,b->o.dump_path,used);
 }
 static uint64_t verify_windows(struct bench *b,unsigned trial,uint64_t *verified) {
     uint64_t bad=0; *verified=0;
@@ -756,7 +781,7 @@ static int run_responder_trial(struct bench *b,unsigned trial,unsigned warmup) {
     t.seconds=now_s()-start; t.cpu_pct=t.seconds>0 ? (cpu_s()-cpu0)/t.seconds*100 : 0;
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     if (b->finish_imm && s.finish_seen && s.imm_value!=(uint32_t)(expected&0xffffffffu)) { ++s.errors; fputs("BW_WC imm_mismatch\n",stderr); }
-    if (b->o.op!=OP_READ) t.mismatches=verify_windows(b,trial,&t.verified);
+    if (b->o.op!=OP_READ) { if (b->o.dump_path) { if (!warmup) dump_landed(b); t.verified=0; t.mismatches=0; } else t.mismatches=verify_windows(b,trial,&t.verified); }
     if (!have_complete) expect_line(b,"COMPLETE",line,sizeof(line));
     if (field_u64(line,"trial",UINT32_MAX)!=trial) fatal("protocol_complete_trial",0);
     if (!field_u64(line,"ok",1)) ++s.errors;
@@ -783,6 +808,7 @@ int main(int argc,char **argv) {
     setvbuf(stdout,NULL,_IOLBF,0);
     static struct bench b;
     parse(&b,argc,argv);
+    load_payload(&b);
     printf("BW_CONFIG role=%s op=%s bytes=%u depth=%u qps=%u cq_per_qp=%u total=%" PRIu64 " repeats=%u warmup=%u mtu=%u finish=%s"
            " verify_bytes=%" PRIu64 " max_region=%" PRIu64 " platform=%s\n",
            b.o.initiator?"initiator":"responder",op_names[b.o.op],b.o.bytes,b.o.depth,b.o.qps,b.o.cq_per_qp,b.o.total,b.o.repeats,
