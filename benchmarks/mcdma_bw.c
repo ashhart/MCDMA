@@ -553,7 +553,7 @@ static void load_payload(struct bench *b) {
     g_payload=malloc((size_t)n); if (!g_payload) fatal("payload_alloc",0);
     if (fread(g_payload,1,(size_t)n,f)!=(size_t)n) fatal("payload_read",errno);
     fclose(f); g_payload_len=(uint64_t)n;
-    msg("PAYLOAD path=%s bytes=%" PRIu64,b->o.payload_path,g_payload_len);
+    printf("BW_PAYLOAD path=%s bytes=%" PRIu64 "\n",b->o.payload_path,g_payload_len); fflush(stdout);
 }
 static void fill_slots(struct bench *b,unsigned trial) {
     const unsigned slots=b->o.qps*b->depth;
@@ -569,7 +569,7 @@ static void dump_landed(struct bench *b) {
     FILE *f=fopen(b->o.dump_path,"wb"); if (!f) fatal("dump_open",errno);
     if (fwrite(b->region,1,(size_t)used,f)!=(size_t)used) fatal("dump_write",errno);
     fclose(f);
-    msg("DUMP path=%s bytes=%" PRIu64,b->o.dump_path,used);
+    printf("BW_DUMP path=%s bytes=%" PRIu64 "\n",b->o.dump_path,used); fflush(stdout);
 }
 static uint64_t verify_windows(struct bench *b,unsigned trial,uint64_t *verified) {
     uint64_t bad=0; *verified=0;

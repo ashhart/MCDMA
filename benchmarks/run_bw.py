@@ -212,7 +212,7 @@ class Relay:
             self.header = header
         elif text.startswith('BW_CSV '):
             self.rows[endpoint].append(text[len('BW_CSV '):])
-        elif text.startswith('BW_RESULT ') or text.startswith('BW_CLAMP ') or text.startswith('BW_FINISH '):
+        elif text.startswith(('BW_RESULT ','BW_CLAMP ','BW_FINISH ','BW_PAYLOAD ','BW_DUMP ')):
             self.results.append(f'{endpoint.host}: {text}')
             print(f'{endpoint.host}: {text}', flush=True)
         elif text.startswith('BW_ERROR '):
