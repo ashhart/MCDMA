@@ -289,6 +289,8 @@ def main(argv=None):
     parser.add_argument('--mac-cq-map', choices=['0', '1', '2'], default='0')
     parser.add_argument('--mac-user-post', choices=['0', '1'], default='0')
     parser.add_argument('--mac-user-bf', choices=['0', '64', '128', '64s', 'db'], default='0')
+    parser.add_argument('--payload', help='initiator streams this file through the slots instead of a seeded pattern')
+    parser.add_argument('--dump', help='responder writes the landed region to this file (skips pattern verify)')
     parser.add_argument('--output', type=Path, required=True, help='new directory for CSVs, logs and the manifest')
     parser.add_argument('--dry-run', action='store_true', help='print every command line; no SSH, no output directory')
     args = parser.parse_args(argv)
