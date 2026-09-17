@@ -82,6 +82,10 @@ def program_arguments(config, role, device, gid_index, args):
             '--timeout', str(args.timeout), '--verify-bytes', str(args.verify_bytes)]
     if config['cq_per_qp']:
         argv.append('--cq-per-qp')
+    if getattr(args,'payload',None) and role=='initiator':
+        argv += ['--payload', args.payload]
+    if getattr(args,'dump',None) and role=='responder':
+        argv += ['--dump', args.dump]
     return argv
 
 
