@@ -360,7 +360,9 @@ def main(argv=None):
         mac_gid, mac_address = gids[args.mac_host]
         peer_gid, peer_address = gids[args.peer_host]
         neighbour = run(args.mac_host, ['ndp', '-n', peer_gid + '%' + args.mac_interface]).lower()
-        if peer_address not in neighbour:
+        # macOS ndp prints MAC octets without leading zeros; normalise both sides before comparing.
+        _norm = lambda m: ':'.join(o.lstrip('0') or '0' for o in m.split(':'))
+        if _norm(peer_address) not in ' '.join(_norm(t) if t.count(':')==5 else t for t in neighbour.split()):
             raise RuntimeError('Mac needs the peer static IPv6 neighbour before QP connection')
         neighbour = run(args.peer_host, ['ip', '-6', 'neigh', 'show', 'to', mac_gid, 'dev', args.peer_interface]).lower()
         if 'lladdr ' + mac_address not in neighbour:
