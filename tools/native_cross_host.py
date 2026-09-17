@@ -318,7 +318,9 @@ def main():
         local, mac_address = descriptor(mac.line())
         remote, spark_address = descriptor(spark.line())
         neighbour = run(args.mac_host, ['ndp', '-n', remote[5]+'%'+args.mac_interface]).lower()
-        if spark_address not in neighbour:
+        # macOS ndp prints MAC octets without leading zeros (30:c5:99:3f:14:d); normalise both sides.
+        _norm = lambda m: ':'.join(o.lstrip('0') or '0' for o in m.split(':'))
+        if _norm(spark_address) not in ' '.join(_norm(t) if t.count(':')==5 else t for t in neighbour.split()):
             raise RuntimeError('Mac needs the peer static IPv6 neighbour before QP connection')
         neighbour = run(args.peer_host, ['ip', '-6', 'neigh', 'show', 'to', local[5], 'dev', args.peer_interface]).lower()
         if 'lladdr '+mac_address not in neighbour:
