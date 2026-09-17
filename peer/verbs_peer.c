@@ -180,12 +180,14 @@ int main(int argc,char **argv) {
     ibv_free_device_list(list); if (!ctx) fail("open device");
     if (initiator || responder) {
         struct ibv_device_attr device={0};
-        if (ibv_query_device(ctx,&device) || device.vendor_id!=0x15b3 || device.vendor_part_id!=0x1019) {
-            fputs("Native initiator must be the physical CX5 Ex\n",stderr); return 2;
-        }
+        if (ibv_query_device(ctx,&device)) fail("query device");
+        const int mellanox=device.vendor_id==0x15b3 && (device.vendor_part_id==0x1019 || device.vendor_part_id==0x1015);
+        const int thunderbolt=device.vendor_id==0 && device.vendor_part_id==0; /* Apple TB-RDMA HCAs report zero ids */
+        if (!mellanox && !thunderbolt) { fputs("Native initiator must be a ConnectX-4/5 or an Apple Thunderbolt RDMA device\n",stderr); return 2; }
     }
     struct ibv_port_attr port; if (ibv_query_port(ctx,1,&port)) fail("query port");
-    if (port.state!=IBV_PORT_ACTIVE || port.link_layer!=IBV_LINK_LAYER_ETHERNET) { fputs("QSFP port is not active Ethernet\n",stderr); return 2; }
+    /* Accept RoCE (Ethernet) and Apple Thunderbolt RDMA (link_layer 100) so the same client drives the Studio mesh. */
+    if (port.state!=IBV_PORT_ACTIVE || (port.link_layer!=IBV_LINK_LAYER_ETHERNET && port.link_layer!=100)) { fputs("port is not active Ethernet/Thunderbolt\n",stderr); return 2; }
     if (path_mtu>port.active_mtu || path_mtu>port.max_mtu) {
         fprintf(stderr,"Requested path MTU exceeds port active/max MTU (%u/%u)\n",
                 128u<<port.active_mtu,128u<<port.max_mtu); ibv_close_device(ctx); return 2;
