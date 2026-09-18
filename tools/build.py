@@ -137,7 +137,7 @@ if len(sys.argv)>1 and sys.argv[1]=='native':
                             'com.apple.iokit.IORDMAFamily':'1.0'},
         'IOKitPersonalities':{'MCDMACX5Native':{
             'CFBundleIdentifier':'org.mcdma.cx5.native','IOClass':'MCDMACX5Native',
-            'IOProviderClass':'IOPCIDevice','IOPCIMatch':'0x101915b3',
+            'IOProviderClass':'IOPCIDevice','IOPCIMatch':'0x101915b3 0x101515b3',
             'IOPCITunnelCompatible':True,'IOProbeScore':20000,
             'MCDMALabEnabled':False,'MCDMAUserQueues':False,'MCDMAUserBlueFlame':False,
             'MCDMARelaxedOrdering':False,'MCDMAAckRequestEveryPacket':False,'MCDMAMaxReadRequestBytes':0}}})

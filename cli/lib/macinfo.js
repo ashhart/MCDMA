@@ -16,7 +16,7 @@ const MLX_DEVICES = {
   '0x101b': 'ConnectX-6', '0x101d': 'ConnectX-6 Dx', '0x101f': 'ConnectX-6 Lx', '0x1021': 'ConnectX-7',
   '0x1023': 'ConnectX-8', '0xa2d6': 'BlueField-2', '0xa2dc': 'BlueField-3'
 };
-const DRIVER_SUPPORTED = new Set(['0x1019']);
+const DRIVER_SUPPORTED = new Set(['0x1019', '0x1015']);
 
 const PROBE = `
 echo '===SWVERS'; sw_vers 2>/dev/null

@@ -43,7 +43,7 @@ function hardwareCheck(studio) {
   }
   for (const c of cards) {
     items.push(item(c.name, `${plural(c.functions.length, 'port')} · PCIe ${c.linkWidth || '?'} ${c.linkSpeed || ''}${c.enclosure ? ` · ${c.enclosure.name}${c.enclosure.receptacle ? ` on Thunderbolt port ${c.enclosure.receptacle}` : ''}` : c.tunnelled ? ' · Thunderbolt' : ' · internal PCIe'}`, c.supported ? 'ok' : 'warn',
-      c.supported ? null : `The MCDMA driver matches ConnectX-5 Ex (device 0x1019) only; this card is ${c.deviceId}.`));
+      c.supported ? null : `The MCDMA driver matches ConnectX-5 Ex (0x1019) and ConnectX-4 Lx (0x1015) only; this card is ${c.deviceId}.`));
     for (const f of c.functions) {
       const p = studio.ports.find((x) => x.pci === f.pci) || {};
       items.push(item(`Port ${f.pci}`, `${f.linkUp ? 'PCIe link up' : 'PCIe link down'}${p.iface ? ` · ${p.iface}` : ''}${p.mac ? ` · ${p.mac}` : ''}${p.portActive ? ' · QSFP link up' : p.iface ? ' · QSFP link down' : ''}`,

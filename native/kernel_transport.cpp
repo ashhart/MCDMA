@@ -49,8 +49,11 @@ IOReturn Buffer::release() {
 IOReturn Transport::attach(IOPCIDevice *device, IOService *owner) {
     if (pci_ || !device || !owner) return kIOReturnBadArgument;
     if (!supported_build()) return kIOReturnUnsupported;
-    if (device->configRead16(0) != 0x15b3 || device->configRead16(2) != 0x1019)
-        return kIOReturnUnsupported;
+    {   // ConnectX-5 Ex (0x1019) is the validated card; ConnectX-4 Lx (0x1015) shares the mlx5 command path and was
+        // brought up on the same code with no other changes (Mac Studio M3 Ultra, Sonnet Echo SE I T5, 2026-09-17).
+        const uint16_t did = device->configRead16(2);
+        if (device->configRead16(0) != 0x15b3 || (did != 0x1019 && did != 0x1015)) return kIOReturnUnsupported;
+    }
     if (!device->open(owner)) return kIOReturnExclusiveAccess;
     pci_ = device; pci_->retain(); owner_ = owner; opened_ = true;
     saved_command_ = pci_->configRead16(4);
