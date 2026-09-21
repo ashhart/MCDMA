@@ -82,6 +82,12 @@ def program_arguments(config, role, device, gid_index, args):
             '--timeout', str(args.timeout), '--verify-bytes', str(args.verify_bytes)]
     if config['cq_per_qp']:
         argv.append('--cq-per-qp')
+    if getattr(args,'payload',None) and role=='initiator':
+        argv += ['--payload', args.payload]
+    if getattr(args,'dump',None) and role=='responder':
+        argv += ['--dump', args.dump]
+    elif getattr(args,'payload',None) and role=='responder':
+        argv += ['--dump', '/dev/null']   # payload mode: landed bytes are real data, not a seeded pattern; skip verifier
     return argv
 
 
@@ -208,7 +214,7 @@ class Relay:
             self.header = header
         elif text.startswith('BW_CSV '):
             self.rows[endpoint].append(text[len('BW_CSV '):])
-        elif text.startswith('BW_RESULT ') or text.startswith('BW_CLAMP ') or text.startswith('BW_FINISH '):
+        elif text.startswith(('BW_RESULT ','BW_CLAMP ','BW_FINISH ','BW_PAYLOAD ','BW_DUMP ')):
             self.results.append(f'{endpoint.host}: {text}')
             print(f'{endpoint.host}: {text}', flush=True)
         elif text.startswith('BW_ERROR '):
@@ -285,6 +291,8 @@ def main(argv=None):
     parser.add_argument('--mac-cq-map', choices=['0', '1', '2'], default='0')
     parser.add_argument('--mac-user-post', choices=['0', '1'], default='0')
     parser.add_argument('--mac-user-bf', choices=['0', '64', '128', '64s', 'db'], default='0')
+    parser.add_argument('--payload', help='initiator streams this file through the slots instead of a seeded pattern')
+    parser.add_argument('--dump', help='responder writes the landed region to this file (skips pattern verify)')
     parser.add_argument('--output', type=Path, required=True, help='new directory for CSVs, logs and the manifest')
     parser.add_argument('--dry-run', action='store_true', help='print every command line; no SSH, no output directory')
     args = parser.parse_args(argv)
