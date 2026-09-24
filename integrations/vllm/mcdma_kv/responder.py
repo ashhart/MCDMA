@@ -6,11 +6,17 @@ import json
 import logging
 import threading
 import time
-import zlib
 from collections.abc import Callable
 from typing import Any
 
 from . import wire
+
+try:
+    # python-isal computes the same zlib CRC-32 about three times faster on aarch64,
+    # where zlib's checksum otherwise limits the handoff rate.
+    from isal.isal_zlib import crc32 as _crc32
+except ImportError:
+    from zlib import crc32 as _crc32
 from .export import Export, plan_frames
 
 logger = logging.getLogger(__name__)
@@ -124,7 +130,7 @@ class Responder:
         area = self._mailbox.reply_area()
         nbytes = self._fill(export, header.frame, area[wire.HEADER_BYTES:])
         checked = self._checksums.get(header.handoff, True)
-        crc = zlib.crc32(area[wire.HEADER_BYTES:wire.HEADER_BYTES + nbytes]) if checked else 0
+        crc = _crc32(area[wire.HEADER_BYTES:wire.HEADER_BYTES + nbytes]) if checked else 0
         area[:wire.HEADER_BYTES] = wire.pack(wire.Header(
             wire.DATA, header.handoff, header.frame, len(export.frames), export.layers[position].index,
             wire.CHECKED if checked else 0, row_start, rows, nbytes, crc))
