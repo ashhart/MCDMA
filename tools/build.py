@@ -84,6 +84,9 @@ if len(sys.argv)>1 and sys.argv[1]=='test':
     run([sys.executable,'-B','tests/test_bw_guard.py'])
     run([sys.executable,'-B','tests/test_ndp_neighbor.py'])
     run([sys.executable,'-B','tests/test_bw_payload.py'])
+    run([sys.executable,'-B','tests/test_llamacpp_kv_handoff.py'])
+    run([sys.executable,'-B','tests/test_rpc_roundtrip.py'])
+    run([sys.executable,'-B','tests/test_rpc_file.py'])
     run([sys.executable,'-B','tests/test_bw_payload_trial.py'])
     sys.exit(0)
 if len(sys.argv)>1 and sys.argv[1]=='native':

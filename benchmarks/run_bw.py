@@ -3,10 +3,11 @@
 
 SSH carries the control protocol and results only: the two mcdma-bw processes
 exchange "BW_MSG" lines through this relay, and the payload moves over the
-RDMA link. Requires a loaded native CX5 provider, configured link-local
-addresses and static neighbours on both spare QSFP interfaces; changes no
-network settings. Every host, path, interface and device is an explicit
-argument, so no private lab value is built in.
+RDMA link. Requires a loaded native CX5 provider (or --mac-platform linux,
+where the first host is a second Linux RDMA host on stock rdma-core),
+configured link-local addresses and static neighbours on both spare QSFP
+interfaces; changes no network settings. Every host, path, interface and
+device is an explicit argument, so no private lab value is built in.
 """
 import argparse
 import datetime
@@ -93,9 +94,12 @@ def build_commands(args, config):
     on each host; the initiator role follows config['initiator']."""
     mac_role = 'initiator' if config['initiator'] == 'mac' else 'responder'
     peer_role = 'responder' if mac_role == 'initiator' else 'initiator'
-    mac = ['env', 'IBV_DRIVERS=' + args.mac_provider[:-len('-rdmav34.so')],
-           'MCDMA_CQ_MAP=' + args.mac_cq_map, 'MCDMA_USER_POST=' + args.mac_user_post,
-           'MCDMA_USER_BF=' + args.mac_user_bf, args.mac_bw]
+    if getattr(args, 'mac_platform', 'macos') == 'linux':
+        mac = [args.mac_bw]
+    else:
+        mac = ['env', 'IBV_DRIVERS=' + args.mac_provider[:-len('-rdmav34.so')],
+               'MCDMA_CQ_MAP=' + args.mac_cq_map, 'MCDMA_USER_POST=' + args.mac_user_post,
+               'MCDMA_USER_BF=' + args.mac_user_bf, args.mac_bw]
     mac += program_arguments(config, mac_role, args.mac_device, args.mac_gid_index, args)
     peer = [args.peer_bw] + program_arguments(config, peer_role, args.peer_device, args.peer_gid_index, args)
     return mac, peer
@@ -105,8 +109,10 @@ def ssh_line(host, command):
     return shlex.join(SSH + [host, shlex.join(command)])
 
 
-def descriptor(payload):
-    """Validate an ENDPOINT payload; returns (fields, mac_address)."""
+def descriptor(payload, ipv4_mapped=False):
+    """Validate an ENDPOINT payload; returns (fields, mac_address). With
+    ipv4_mapped (Linux pairs only) a ::ffff:a.b.c.d RoCE v2 GID is also
+    accepted; its mac_address is None because ARP, not the GID, supplies it."""
     words = payload.split()
     if not words or words[0] != 'ENDPOINT':
         raise ValueError('Missing bandwidth endpoint')
@@ -132,6 +138,11 @@ def descriptor(payload):
             any(not re.fullmatch(r'[0-9]+', q) or not 0 < int(q) <= 0xffffff for q in qpns)):
         raise ValueError('Invalid endpoint bounds')
     gid = ipaddress.IPv6Address(fields['gid'])
+    if ipv4_mapped and gid.ipv4_mapped is not None:
+        ipv4 = gid.ipv4_mapped
+        if ipv4.is_multicast or ipv4.is_unspecified or ipv4.is_loopback or ipv4.is_reserved:
+            raise ValueError('Expected a unicast IPv4-mapped GID')
+        return fields, None
     raw = gid.packed
     if not gid.is_link_local or raw[11:13] != b'\xff\xfe':
         raise ValueError('Expected a MAC-derived link-local GID')
@@ -174,6 +185,38 @@ def mac_mode_markers(stderr, cq_map, user_post, user_bf, cqs, qps):
         queues.append(line)
     if bfs.count(f'MCDMA_USER_BF mode={user_bf} uar_wc=1') != 1 or len(queues) != qps or len(bfs) != qps + 1:
         raise ValueError('Userspace BlueFlame arm was requested but not confirmed for every QP: ' + repr(bfs))
+
+
+def linux_mode_markers(stderr):
+    """A Linux first host runs stock rdma-core: no MCDMA provider mode exists
+    to confirm, so any MCDMA provider marker means the wrong provider loaded."""
+    markers = [line for line in stderr.splitlines() if line.startswith('MCDMA_')]
+    if markers:
+        raise ValueError('Unexpected MCDMA provider markers on a Linux host: ' + repr(markers))
+
+
+def check_linux_gid(run, host, device, gid_index, interface):
+    base = f'/sys/class/infiniband/{device}/ports/1/gid_attrs'
+    return (run(host, ['cat', f'{base}/types/{gid_index}']) == 'RoCE v2' and
+            run(host, ['cat', f'{base}/ndevs/{gid_index}']) == interface)
+
+
+def linux_has_neighbour(run, host, gid, interface, address):
+    return 'lladdr ' + address in run(host, ['ip', '-6', 'neigh', 'show', 'to', gid, 'dev', interface]).lower()
+
+
+ARP_STATES = ('REACHABLE', 'STALE', 'DELAY', 'PROBE', 'PERMANENT')
+
+
+def linux_has_ipv4_neighbour(run, host, ipv4, interface):
+    """An IPv4-mapped RoCE v2 GID resolves through ARP, so any entry with a
+    link-layer address counts; FAILED and INCOMPLETE rows carry none."""
+    for line in run(host, ['ip', '-4', 'neigh', 'show', 'to', ipv4, 'dev', interface]).splitlines():
+        words = line.split()
+        if (len(words) >= 4 and words[0] == ipv4 and 'lladdr' in words[:-1] and words[-1].upper() in ARP_STATES and
+                re.fullmatch(r'[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}', words[words.index('lladdr') + 1])):
+            return True
+    return False
 
 
 class Relay:
@@ -266,11 +309,15 @@ def remote_sha256(run, host, path, linux):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    for name in ['mac-host', 'peer-host', 'mac-bw', 'peer-bw', 'mac-provider', 'mac-checker',
+    for name in ['mac-host', 'peer-host', 'mac-bw', 'peer-bw',
                  'mac-interface', 'peer-interface', 'mac-device', 'peer-device']:
         parser.add_argument('--' + name, required=True)
-    parser.add_argument('--mac-gid-index', type=int, default=0)
-    parser.add_argument('--peer-gid-index', type=int, default=1)
+    parser.add_argument('--mac-platform', choices=['macos', 'linux'], default='macos',
+                        help='first host OS; linux runs stock rdma-core with no MCDMA provider or checker')
+    parser.add_argument('--mac-provider', help='required with --mac-platform macos')
+    parser.add_argument('--mac-checker', help='required with --mac-platform macos')
+    parser.add_argument('--mac-gid-index', type=int, help='default 0 on macos; required on linux')
+    parser.add_argument('--peer-gid-index', type=int, help='default 1 on macos; required on linux')
     parser.add_argument('--ops', type=lambda t: parse_list(t, 'op', allowed=OPS), default=list(OPS))
     parser.add_argument('--sizes', type=lambda t: parse_list(t, 'size', low=4096, high=16 << 20),
                         default=[4096, 65536, 1 << 20, 16 << 20], help='bytes per request, 4096..16777216')
@@ -293,6 +340,21 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, required=True, help='new directory for CSVs, logs and the manifest')
     parser.add_argument('--dry-run', action='store_true', help='print every command line; no SSH, no output directory')
     args = parser.parse_args(argv)
+    linux = args.mac_platform == 'linux'
+    if linux:
+        if args.mac_provider or args.mac_checker:
+            parser.error('--mac-provider and --mac-checker apply only to --mac-platform macos')
+        if (args.mac_cq_map, args.mac_user_post, args.mac_user_bf) != ('0', '0', '0'):
+            parser.error('--mac-cq-map, --mac-user-post and --mac-user-bf require --mac-platform macos')
+    elif not (args.mac_provider and args.mac_checker):
+        parser.error('--mac-platform macos requires --mac-provider and --mac-checker')
+    if linux and (args.mac_gid_index is None or args.peer_gid_index is None):
+        parser.error('--mac-platform linux requires --mac-gid-index and --peer-gid-index: pick the RoCE v2 entry '
+                     'whose GID is ::ffff:<port IPv4> (or the link-local RoCE v2 entry)')
+    if args.mac_gid_index is None:
+        args.mac_gid_index = 0
+    if args.peer_gid_index is None:
+        args.peer_gid_index = 1
     if args.mac_user_post == '1' and args.mac_cq_map != '2':
         parser.error('--mac-user-post 1 requires --mac-cq-map 2')
     if args.mac_user_bf != '0' and args.mac_user_post != '1':
@@ -300,7 +362,7 @@ def main(argv=None):
     for value in [args.mac_interface, args.peer_interface, args.mac_device, args.peer_device]:
         if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,64}', value):
             parser.error('Invalid interface/device identifier')
-    if not args.mac_provider.startswith('/') or not args.mac_provider.endswith('-rdmav34.so'):
+    if not linux and (not args.mac_provider.startswith('/') or not args.mac_provider.endswith('-rdmav34.so')):
         parser.error('Use the absolute path to libmcdma-rdmav34.so')
     if not (0 <= args.mac_gid_index <= 255 and 0 <= args.peer_gid_index <= 255):
         parser.error('Invalid GID index')
@@ -348,15 +410,19 @@ def main(argv=None):
         (args.output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 
     try:
-        run(args.mac_host, [args.mac_checker, '--provider', args.mac_provider, '--require-gid'])
-        base = f'/sys/class/infiniband/{args.peer_device}/ports/1/gid_attrs'
-        if run(args.peer_host, ['cat', f'{base}/types/{args.peer_gid_index}']) != 'RoCE v2' or \
-           run(args.peer_host, ['cat', f'{base}/ndevs/{args.peer_gid_index}']) != args.peer_interface:
+        if linux:
+            if not check_linux_gid(run, args.mac_host, args.mac_device, args.mac_gid_index, args.mac_interface):
+                raise RuntimeError('Mac-side Linux GID is not RoCE v2 on the selected spare interface')
+        else:
+            run(args.mac_host, [args.mac_checker, '--provider', args.mac_provider, '--require-gid'])
+        if not check_linux_gid(run, args.peer_host, args.peer_device, args.peer_gid_index, args.peer_interface):
             raise RuntimeError('Peer GID is not RoCE v2 on the selected spare interface')
         manifest['binaries'] = {
-            'mac': {'path': args.mac_bw, 'sha256': remote_sha256(run, args.mac_host, args.mac_bw, linux=False)},
-            'peer': {'path': args.peer_bw, 'sha256': remote_sha256(run, args.peer_host, args.peer_bw, linux=True)},
-            'mac_provider': {'path': args.mac_provider, 'sha256': remote_sha256(run, args.mac_host, args.mac_provider, linux=False)}}
+            'mac': {'path': args.mac_bw, 'sha256': remote_sha256(run, args.mac_host, args.mac_bw, linux=linux)},
+            'peer': {'path': args.peer_bw, 'sha256': remote_sha256(run, args.peer_host, args.peer_bw, linux=True)}}
+        if not linux:
+            manifest['binaries']['mac_provider'] = {
+                'path': args.mac_provider, 'sha256': remote_sha256(run, args.mac_host, args.mac_provider, linux=False)}
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         manifest['errors'].append(f'preflight: {error}')
         write_manifest()
@@ -366,15 +432,28 @@ def main(argv=None):
     def check_endpoints(held):
         gids = {}
         for endpoint, payload in held.items():
-            fields, mac_address = descriptor(payload)
+            fields, mac_address = descriptor(payload, ipv4_mapped=linux)
             gids[endpoint.host] = (fields['gid'], mac_address)
         mac_gid, mac_address = gids[args.mac_host]
         peer_gid, peer_address = gids[args.peer_host]
-        neighbour = run(args.mac_host, ['ndp', '-n', peer_gid + '%' + args.mac_interface]).lower()
-        if not cross.ndp_has_neighbor(neighbour, peer_gid, args.mac_interface, peer_address):
-            raise RuntimeError('Mac needs the peer static IPv6 neighbour before QP connection')
-        neighbour = run(args.peer_host, ['ip', '-6', 'neigh', 'show', 'to', mac_gid, 'dev', args.peer_interface]).lower()
-        if 'lladdr ' + mac_address not in neighbour:
+        if (mac_address is None) != (peer_address is None):
+            raise RuntimeError('Endpoints must both use IPv4-mapped or both use link-local GIDs')
+        if mac_address is None:
+            mac_ipv4 = str(ipaddress.IPv6Address(mac_gid).ipv4_mapped)
+            peer_ipv4 = str(ipaddress.IPv6Address(peer_gid).ipv4_mapped)
+            if not linux_has_ipv4_neighbour(run, args.mac_host, peer_ipv4, args.mac_interface):
+                raise RuntimeError(f'Mac-side Linux host has no ARP entry for {peer_ipv4}; ping it over the RDMA port first')
+            if not linux_has_ipv4_neighbour(run, args.peer_host, mac_ipv4, args.peer_interface):
+                raise RuntimeError(f'Linux peer has no ARP entry for {mac_ipv4}; ping it over the RDMA port first')
+            return
+        if linux:
+            if not linux_has_neighbour(run, args.mac_host, peer_gid, args.mac_interface, peer_address):
+                raise RuntimeError('Mac-side Linux host needs the peer static IPv6 neighbour before QP connection')
+        else:
+            neighbour = run(args.mac_host, ['ndp', '-n', peer_gid + '%' + args.mac_interface]).lower()
+            if not cross.ndp_has_neighbor(neighbour, peer_gid, args.mac_interface, peer_address):
+                raise RuntimeError('Mac needs the peer static IPv6 neighbour before QP connection')
+        if not linux_has_neighbour(run, args.peer_host, mac_gid, args.peer_interface, mac_address):
             raise RuntimeError('Linux peer needs the Mac static IPv6 neighbour before QP connection')
 
     exit_code = 0
@@ -412,7 +491,10 @@ def main(argv=None):
             stderr = ''.join(entry.get('endpoint_stderr', '') for entry in log if entry.get('host') == args.mac_host)
             cqs = item['qps'] if item['cq_per_qp'] else 1
             try:
-                mac_mode_markers(stderr, args.mac_cq_map, args.mac_user_post, args.mac_user_bf, cqs, item['qps'])
+                if linux:
+                    linux_mode_markers(stderr)
+                else:
+                    mac_mode_markers(stderr, args.mac_cq_map, args.mac_user_post, args.mac_user_bf, cqs, item['qps'])
                 record['mode_confirmed'] = True
             except ValueError as error:
                 errors.append(f'mac mode: {error}')
