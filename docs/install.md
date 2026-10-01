@@ -109,6 +109,8 @@ Keep the printed backup directory. If `kmutil` requests approval, open System Se
 
 After approval/restart, shut down, connect the powered Helios over Thunderbolt 5 and attach the QSFP28 cable to the intended Spark port, then boot and sign in. This avoids relying on unvalidated removal of a running driver with mapped DMA pages. If both Studio ports are cabled, confirm which Spark port each cable actually reaches before configuring addresses and neighbors. A crossed pair observed on 2026-09-15 reported the port active on both sides while Studio-initiated transfers failed with retry-exceeded completions; swapping the two cables at the Studio fixed it without any software change.
 
+On Mac laptops with Apple silicon, macOS can hold a newly connected accessory until the user approves it ([Apple: allow accessories to connect](https://support.apple.com/en-ie/102282)); the default policy, *Ask for new accessories*, prompts the first time a device connects. After the Helios is connected, macOS asks whether to **Allow accessory to connect**; until that is accepted, System Information lists the Helios on Thunderbolt at its full link rate but no PCI device behind it, so no driver can match the card. Confirm that `system_profiler SPPCIDataType` lists vendor `0x15b3`, device `0x1019` before checking which driver owns it. This was observed on 2026-09-23 on a MacBook Pro with macOS 27 build `26A428` and Apple's built-in Ethernet driver, before MCDMA was installed.
+
 ```sh
 kmutil showloaded --list-only --variant-suffix release | grep org.mcdma.cx5.native
 ioreg -r -c MCDMACX5Native -l
@@ -122,6 +124,12 @@ Check version 0.1.18 and the UUID recorded from your own signed build. A mismatc
 
 On the Spark, inspect `rdma link`, `ip -br link` and `ibv_devinfo`, select the CX7 port physically connected to the Mac, and record its netdev, RDMA device, port, MAC address and RoCE v2 GID index. Do not change the separate inter-Spark link. The Linux interface must be in Ethernet/RoCE mode with its normal `mlx5_core` and `mlx5_ib` drivers.
 
+On GB10-based peers, each QSFP port appears as two netdevs and two RDMA devices on separate PCIe functions, for example `enp1s0f1np1` / `rocep1s0f1` and `enP2p1s0f1np1` / `roceP2p1s0f1`, and both report link on the one cable. Pick one pair and use it consistently for `PEER_IF`, the RDMA device and the GID index. On an ASUS Ascent GX10 (GB10, ConnectX-7 firmware 28.45.4028, Ubuntu 24.04) the `enp1s0…` / `rocep1s0…` function was used.
+
+Leave the peer port at its default autonegotiation and FEC settings. On the same GX10, a port that had earlier been forced with `ethtool -s "$PEER_IF" speed 100000 autoneg off` and `ethtool --set-fec "$PEER_IF" encoding rs` stayed down with a working cable; `ethtool -s "$PEER_IF" autoneg on` and `ethtool --set-fec "$PEER_IF" encoding auto` brought it up at 100000 Mb/s with RS-FEC active.
+
+If the port reports `Link detected: no (Cable issue, Unsupported cable)`, read the cable's identification with `sudo ethtool -m "$PEER_IF"` before suspecting the NIC. Two generic third-party 1 m QSFP28 DACs whose `Transceiver codes` were all `0x00`, with no extended 100GBASE-CR4 compliance code, never linked on the ConnectX-7 ports of two GX10s, with autonegotiation or forced to 100 Gb/s, and a CX5 port-to-port loopback under Apple's Ethernet driver stayed inactive with the same cable. As a control, the NVIDIA DAC already used between the two GX10s linked the same CX5 and ConnectX-7 ports at 100GBASE-CR4 immediately; that is an observation about that one cable, not a recommended part. Use the MCP1600-C001E30N listed above, and check that `ethtool -m` names a 100GBASE-CR4 transceiver type for any other DAC.
+
 Clone this repository on the Spark too and check out the same commit as on the Mac before building the peer client. You can obtain that commit with `git rev-parse HEAD` in the Mac checkout.
 
 For an Ubuntu-based peer with missing development tools, install `build-essential`, `libibverbs-dev`, `ibverbs-utils`, `rdma-core` and `iproute2` using its package manager. Build the supplied peer client:
@@ -131,7 +139,13 @@ mkdir -p build
 cc -std=c11 -O2 -Wall -Wextra -Werror peer/verbs_peer.c -libverbs -o build/verbs-peer
 ```
 
-Set `PEER_IF` to the selected physical port, then inspect its GIDs and addresses:
+Set `PEER_IF` to the selected physical port. If NetworkManager manages it, as on a default DGX OS or Ubuntu desktop install, it keeps retrying DHCP on this unaddressed link; on the GX10 above it was still "connecting (getting IP configuration)" after the link came up. Release the port before making the manual MTU, address and neighbor changes so that a NetworkManager reconnect cannot replace them. This setting lasts only until the peer reboots ([NetworkManager: unmanaging devices](https://networkmanager.dev/docs/admins/#unmanaging-devices)), so repeat it after every peer reboot before restoring the MTU, address and neighbor:
+
+```sh
+sudo nmcli dev set "$PEER_IF" managed no
+```
+
+Then inspect its GIDs and addresses:
 
 ```sh
 sudo ip link set dev "$PEER_IF" mtu 9000 up
@@ -171,7 +185,7 @@ sudo ip -6 neigh replace "$MAC_GID" lladdr "$MAC_HWADDR" nud permanent dev "$PEE
 ip -6 neigh show to "$MAC_GID" dev "$PEER_IF"
 ```
 
-This peer entry is also temporary and must be restored after a peer reboot. Both static neighbors are required because the Mac's address-only interface cannot answer ordinary neighbor discovery.
+This peer entry is also temporary and must be restored after a peer reboot, after releasing `$PEER_IF` from NetworkManager again as described above. Both static neighbors are required because the Mac's address-only interface cannot answer ordinary neighbor discovery.
 
 The driver configures and reads back its Ethernet MTU; a software-only `ifconfig mtu` change is rejected. Inspect the actual Mac MTU and use the matching RC path MTU. The native address interface does not send ordinary NDP packets, which is why the static neighbor is explicit.
 

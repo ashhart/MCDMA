@@ -39,7 +39,7 @@ static int g_npeers;
    off (MCDMARelaxedOrdering = No); MCDMA_RPC_PULL=1 falls back to READing the payload. */
 static int g_direct = 1;
 
-static void box_shm_name(const struct peer *p, char *out, size_t n) { snprintf(out, n, "/mcdma-rpc.%s", p->name); }
+static void box_shm_name(const struct peer *p, char *out, size_t n) { snprintf(out, n, "/mcdma-rpc.%.*s", (int)sizeof(p->name), p->name); }
 
 static int box_create(struct peer *p) {
     char name[64];
@@ -258,11 +258,11 @@ static void connect_status(int fd) {
         struct peer *p = &g_peers[i];
         int up = __atomic_load_n(&p->up, __ATOMIC_ACQUIRE);
         snprintf(out, sizeof(out),
-                 "PEER %s %s calls %" PRIu64 " failures %" PRIu64 " MiB %" PRIu64
-                 " host=%s port=%d device=%s req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld",
-                 p->name, up ? "up" : "down", __atomic_load_n(&p->calls, __ATOMIC_RELAXED),
+                 "PEER %.*s %s calls %" PRIu64 " failures %" PRIu64 " MiB %" PRIu64
+                 " host=%.*s port=%d device=%.*s req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld",
+                 (int)sizeof(p->name), p->name, up ? "up" : "down", __atomic_load_n(&p->calls, __ATOMIC_RELAXED),
                  __atomic_load_n(&p->failures, __ATOMIC_RELAXED), __atomic_load_n(&p->bytes, __ATOMIC_RELAXED) >> 20,
-                 p->host, p->port, p->device, p->b.req >> 20, p->b.rep >> 20,
+                 (int)sizeof(p->host), p->host, p->port, (int)sizeof(p->device), p->device, p->b.req >> 20, p->b.rep >> 20,
                  up ? __atomic_load_n(&p->since, __ATOMIC_RELAXED) : 0);
         send_line(fd, out);
     }
