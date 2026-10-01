@@ -31,9 +31,96 @@ void connect(Hca &hca,HardwareQP &qp) {
 void driver_startup() {
     reset(); Hca hca;
     // Same composition called by the real IOService, with fake PCI/firmware.
-    assert(hca.attach_and_start(nullptr,nullptr));
+    assert(hca.attach_and_start(nullptr,nullptr) && hca.startup_error==kIOReturnSuccess);
     assert(hca.transport.initialized && !sim.objects.empty());
     assert(hca.stop() && !sim.buffers);
+}
+void issue_9_page_query_without_firmware_error() {
+    reset(); sim.command_queue_high=1; sim.command_queue_low=0x156;
+    Hca boot_owned;
+    assert(!boot_owned.start());
+    assert(boot_owned.startup_error==kIOReturnBusy &&
+           boot_owned.startup_page_phase==0 && boot_owned.startup_page_step==0 &&
+           !sim.calls && !sim.buffers);
+    assert(boot_owned.stop());
+
+    // Both functions report this exact low word after the enclosure is
+    // power-cycled. They must be able to reach QUERY_PAGES on first attach.
+    reset(); sim.command_queue_low=0x80000156;
+    Hca cold_boot;
+    assert(cold_boot.start());
+    assert(cold_boot.transport.last.opcode!=0 && sim.calls>0);
+    assert(cold_boot.stop() && !sim.buffers);
+
+    // An apparent host address remains protected unless the entire observed
+    // disabled-mode signature matches. A high word always keeps it busy.
+    for (const auto low : {0x80000056u,0x80001156u,0x80000157u}) {
+        reset(); sim.command_queue_low=low;
+        Hca occupied;
+        assert(!occupied.start() && occupied.startup_error==kIOReturnBusy && !sim.calls);
+        assert(occupied.stop() && !sim.buffers);
+    }
+    reset(); sim.command_queue_high=1; sim.command_queue_low=0x80000156;
+    Hca high_address;
+    assert(!high_address.start() && high_address.startup_error==kIOReturnBusy && !sim.calls);
+    assert(high_address.stop() && !sim.buffers);
+
+    // QUERY_PAGES succeeded, then a local validation or allocation failed.
+    // The issue's last-opcode/firmware fields alone cannot distinguish them.
+    reset(); sim.query_pages_count=16385;
+    Hca invalid_count;
+    assert(!invalid_count.start());
+    assert(invalid_count.transport.last.opcode==0x107 &&
+           invalid_count.transport.last.firmware_status==0);
+    assert(invalid_count.startup_error==kIOReturnBadArgument);
+    assert(invalid_count.startup_page_phase==1 &&
+           invalid_count.startup_page_step==2 &&
+           invalid_count.startup_page_count==16385);
+    assert(invalid_count.stop() && !sim.buffers);
+
+    reset(); sim.query_pages_count=-1;
+    Hca negative_count;
+    assert(!negative_count.start());
+    assert(negative_count.startup_error==kIOReturnBadArgument &&
+           negative_count.startup_page_step==2 && negative_count.startup_page_count==-1);
+    assert(negative_count.stop() && !sim.buffers);
+
+    reset(); sim.fail_buffer_allocate_bytes=8192;
+    Hca no_memory;
+    assert(!no_memory.start());
+    assert(no_memory.transport.last.opcode==0x107 &&
+           no_memory.transport.last.firmware_status==0);
+    assert(no_memory.startup_error==kIOReturnNoMemory);
+    assert(no_memory.startup_page_phase==1 &&
+           no_memory.startup_page_step==3 &&
+           no_memory.startup_page_count==2);
+    assert(no_memory.stop() && !sim.buffers);
+}
+void issue_9_large_initial_page_request() {
+    reset(); sim.query_initial_pages_count=8828;
+    Hca hca;
+    assert(hca.start());
+    assert(hca.startup_error==kIOReturnSuccess && hca.startup_page_count==8828);
+    assert(sim.pages.size()==8830);
+    assert(hca.stop() && sim.pages.empty() && !sim.buffers);
+
+    reset(); sim.query_initial_pages_count=8828;
+    sim.fail_buffer_allocate_bytes=uint64_t(8828)*4096;
+    Hca allocation_failure;
+    assert(!allocation_failure.start());
+    assert(allocation_failure.startup_error==kIOReturnNoMemory &&
+           allocation_failure.startup_page_phase==2 &&
+           allocation_failure.startup_page_step==3 &&
+           allocation_failure.startup_page_count==8828);
+    assert(allocation_failure.stop() && sim.pages.empty() && !sim.buffers);
+
+    reset(); sim.query_initial_pages_count=16385;
+    Hca over_limit;
+    assert(!over_limit.start());
+    assert(over_limit.startup_error==kIOReturnBadArgument &&
+           over_limit.startup_page_phase==2 && over_limit.startup_page_step==2 &&
+           over_limit.startup_page_count==16385);
+    assert(over_limit.stop() && sim.pages.empty() && !sim.buffers);
 }
 void transport_access_guards() {
     reset(); Transport transport;
@@ -506,6 +593,8 @@ int main() {
     blueflame_guards_and_fallback();
     mtu_configuration();
     driver_startup();
+    issue_9_page_query_without_firmware_error();
+    issue_9_large_initial_page_request();
     pcie_counters();
     lifecycle(); failed_create(false); failed_create(true); corrupt_completion(); corrupt_page_return();
     native_data_callbacks();

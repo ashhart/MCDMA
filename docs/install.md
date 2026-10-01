@@ -25,7 +25,7 @@ The wider lab has two Sparks, but the published latency figures cover one direct
 
 The source accepts exact builds `26A428` and the earlier inspected beta `26A5425a`; this guide and restore helper target `26A428`. An arbitrary macOS 27 build is not sufficient. Check `sw_vers -buildVersion`, and do not remove the build guard to force an unsupported version to load.
 
-Apple's built-in AppleEthernetMLX5 Ethernet driver and Apple's Thunderbolt RDMA enablement are separate from this native CX5 RDMA provider. MCDMA takes ownership of the selected CX5 PCI functions. Its `mcrdmaN` interfaces hold RDMA addressing; they do not provide ordinary IP packet transmission, ping or TCP networking. Use Wi-Fi or another Ethernet interface for management.
+Apple's built-in AppleEthernetMLX5 Ethernet driver and Apple's Thunderbolt RDMA enablement are separate from this native CX5 RDMA provider. MCDMA requires exclusive ownership of the selected CX5 PCI functions; installing and loading the kext does not prove that it won the device match. Its `mcrdmaN` interfaces hold RDMA addressing; they do not provide ordinary IP packet transmission, ping or TCP networking. Use Wi-Fi or another Ethernet interface for management.
 
 ## 1. Enable RDMA and developer kernel extensions in Recovery
 
@@ -117,6 +117,14 @@ ibv_devices
 ```
 
 Check version 0.1.18 and the UUID recorded from your own signed build. A mismatched UUID means the expected build is not loaded. `MCDMAQuarantined` or a nonzero startup error requires diagnosis, not repeated transfer attempts. The old `rdma_enN` Thunderbolt ports may remain down when no Mac-to-Mac Thunderbolt RDMA link exists; the CX5 devices are named `rdma_mcrdmaN`.
+
+### If Apple's driver owns the CX5
+
+Issue [#9](https://github.com/ashhart/MCDMA/issues/9) reports an approved 0.1.18 kext that loaded but did not own either CX5 function on a fresh install. A boot with the enclosure's mains power cycled still showed command-queue low `0x80000156` before MCDMA issued a command; Apple's Ethernet driver started only after MCDMA closed the PCI function. The [NVIDIA PRM](https://network.nvidia.com/sites/default/files/doc-2020/ethernet-adapters-programming-manual.pdf) identifies bits 9:8 as NIC interface mode (1 means disabled), bits 7:0 as queue geometry, and bits 31:12 as the queue address; the [Linux mlx5 startup path](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/mellanox/mlx5/core/cmd.c) writes its own mapped queue address without requiring those address bits to start at zero. Commit `da84098` admits only the observed disabled-mode word with a zero high word, while still rejecting other programmed addresses. A hardware run passed that guard on both functions, then reached initial `QUERY_PAGES`: firmware requested 8,828 pages, above the former 8,192-page pool limit. This candidate raises the limit to the allocator's existing 64 MiB ceiling (16,384 pages per pool), sizes the DMA buffer from the firmware's count, and tracks handed-out pages in a compact bitmap. Hardware validation of the larger allocation and transfer path is pending. Apple's [matching description](https://developer.apple.com/library/archive/documentation/DeviceDrivers/Conceptual/IOKitFundamentals/Matching/Matching.html) allows the next candidate to start when a driver's start fails.
+
+If there is no `mcrdmaN`, stop before address configuration and collect the native parent properties from `ioreg -p IOService -l -w0` along with the driver child name for each CX5 function. In a diagnostic build, `MCDMANativeStartError` records a local failure even when the firmware command succeeded; `MCDMANativePagePhase` is 1 for boot pages or 2 for initial pages, and `MCDMANativePageStep` is 1 for `QUERY_PAGES`, 2 for count validation, 3 for allocation/mapping, or 4 for `MANAGE_PAGES`. `MCDMANativePageCountRaw` is the signed page count's 32-bit representation. A step of zero means the page path completed or was not entered. Review these properties together with `MCDMANativeLastOpcode`, `MCDMANativeTransportError`, `MCDMANativeFirmwareStatus`, `MCDMANativeFirmwareSyndrome`, and command-queue high/low; `LastOpcode=0x107` alone does not identify the local failure.
+
+Do not clear a busy command queue, unload Apple's driver, change matching policy, or increase `IOProbeScore` as a troubleshooting shortcut. The native driver still refuses other programmed queue addresses. A fresh-install device-ownership fix is not yet hardware-verified; keep the installation in recovery mode or use the documented removal steps if the native owner is required immediately. Redact hardware addresses, serials and private paths before sharing diagnostics.
 
 ## 4. Configure the Linux peer and restore the Mac GID
 

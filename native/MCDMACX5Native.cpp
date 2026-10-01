@@ -31,7 +31,7 @@ bool MCDMACX5Native::start(IOService *parent) {
     if (!state_) { IOService::stop(parent); return false; }
     auto &s=*state_;
     const char *stage="workloop";
-    parent->setProperty("MCDMANativeVersion","0.1.17");
+    parent->setProperty("MCDMANativeVersion","0.1.18");
     workloop_=IOWorkLoop::workLoop();
     timer_=IOTimerEventSource::timerEventSource(this,poll);
     if (!workloop_ || !timer_ || workloop_->addEventSource(timer_)) goto failure;
@@ -108,6 +108,11 @@ failure:
     // startup result even when IOLog is not retained in the kernel log.
     parent->setProperty("MCDMANativeStartStage",stage);
     parent->setProperty("MCDMANativeStartError",uint32_t(s.hca.startup_error),32);
+    // Step 1=query, 2=page-count validation, 3=allocation/mapping,
+    // 4=MANAGE_PAGES; zero means the page path completed or was not entered.
+    parent->setProperty("MCDMANativePagePhase",s.hca.startup_page_phase,16);
+    parent->setProperty("MCDMANativePageStep",s.hca.startup_page_step,16);
+    parent->setProperty("MCDMANativePageCountRaw",uint32_t(s.hca.startup_page_count),32);
     parent->setProperty("MCDMANativeLastOpcode",s.hca.transport.last.opcode,16);
     parent->setProperty("MCDMANativeTransportError",s.hca.transport.last.transport_error,32);
     parent->setProperty("MCDMANativeFirmwareStatus",s.hca.transport.last.firmware_status,32);
