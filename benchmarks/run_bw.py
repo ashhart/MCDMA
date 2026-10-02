@@ -125,7 +125,7 @@ def descriptor(payload):
         raise ValueError('Non-numeric endpoint field')
     numbers = {key: int(value) for key, value in numbers.items()}
     qpns = fields['qpn'].split(',')
-    if (numbers['v'] != 1 or fields['role'] not in ('initiator', 'responder') or fields['op'] not in OPS or
+    if (numbers['v'] not in (1, 3) or fields['role'] not in ('initiator', 'responder') or fields['op'] not in OPS or
             not 0 < numbers['rkey'] <= 0xffffffff or not 0 < numbers['length'] <= 1 << 40 or
             not 0 < numbers['addr'] <= (1 << 64) - numbers['length'] or not 1 <= numbers['qps'] <= 8 or
             len(qpns) != numbers['qps'] or numbers['psn'] > 0xffffff or
@@ -204,6 +204,14 @@ class Relay:
                         self.other(source).send(held)
                 return
             self.other(endpoint).send(payload)
+            if payload.startswith('CONFIRMED v=3 '):
+                # Protocol v3 finishes its proof exchange with CONFIRMED. Both
+                # endpoints then wait for EOF from the relay before exiting.
+                for peer in self.endpoints:
+                    try:
+                        peer.process.stdin.close()
+                    except (OSError, ValueError):
+                        pass
         elif text.startswith('BW_CSV_HEADER '):
             header = text[len('BW_CSV_HEADER '):]
             if self.header not in (None, header):

@@ -114,10 +114,13 @@ class SweepTests(unittest.TestCase):
         fields, mac = run_bw.descriptor(good)
         self.assertEqual(mac, '02:00:00:00:00:01')
         self.assertEqual(fields['qpn'], '17,18')
+        v3_fields, v3_mac = run_bw.descriptor(good.replace('v=1', 'v=3'))
+        self.assertEqual(v3_fields['v'], '3')
+        self.assertEqual(v3_mac, mac)
         for bad in (good.replace('qpn=17,18', 'qpn=17'), good.replace('gid=fe80::ff:fe00:1', 'gid=2001:db8::1'),
                     good.replace('rkey=4660', 'rkey=0'), good.replace('op=write', 'op=atomic'),
                     good.replace(' length=2113536', ''), good.replace('ENDPOINT', 'READY'),
-                    good.replace('addr=4294967296', 'addr=18446744073709551615')):
+                    good.replace('addr=4294967296', 'addr=18446744073709551615'), good.replace('v=1', 'v=2')):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 run_bw.descriptor(bad)
 
@@ -191,6 +194,25 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(relay.errors, [])
         self.assertEqual(relay.done, {mac, peer})
         self.assertTrue(any(entry.get('response', '').startswith('BW_RESULT side=initiator') for entry in log))
+
+    def test_v3_confirmed_is_forwarded_before_control_inputs_close(self):
+        class FakeEndpoint:
+            def __init__(self, host):
+                self.host = host
+                self.sent = []
+                self.process = type('Process', (), {'stdin': io.BytesIO()})()
+
+            def send(self, text):
+                self.sent.append(text)
+
+        mac, peer = FakeEndpoint('mac-test'), FakeEndpoint('linux-test')
+        relay = run_bw.Relay([mac, peer], [], run_bw.time.monotonic() + 20, lambda _: None)
+
+        relay.handle(peer, 'BW_MSG CONFIRMED v=3 trial=0')
+
+        self.assertEqual(mac.sent, ['CONFIRMED v=3 trial=0'])
+        self.assertTrue(mac.process.stdin.closed)
+        self.assertTrue(peer.process.stdin.closed)
 
     def test_relay_stops_when_neighbour_check_fails(self):
         log = []
