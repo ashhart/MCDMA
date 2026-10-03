@@ -1,11 +1,13 @@
 """Offline checks for the bandwidth sweep runner and summariser; no SSH or hardware."""
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
+import signal
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,6 +109,94 @@ class SweepTests(unittest.TestCase):
                       ['--mac-user-post', '1'], ['--sizes', '4096,4096'], ['--total', '10', '--sizes', '4096']):
             with self.subTest(extra=extra), patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit):
                 run_bw.main(BASE_ARGS + extra + ['--output', '/nonexistent/test-output', '--dry-run'])
+
+    def run_interrupted(self, signum):
+        endpoints = []
+
+        class Endpoint:
+            def __init__(self, host, _command, _log):
+                self.host = host
+                self.process = Mock()
+                self.process.stdout.fileno.return_value = 1
+                endpoints.append(self)
+
+            def stop(self):
+                self.stopped = True
+                return 0
+
+        def remote(command, **_kwargs):
+            target = command[-1]
+            stdout = ''
+            if 'gid_attrs/types/' in target:
+                stdout = 'RoCE v2\n'
+            elif 'gid_attrs/ndevs/' in target:
+                stdout = 'enp9s0\n'
+            elif 'sha256sum ' in target or 'shasum -a 256 ' in target:
+                stdout = 'a' * 64 + '  fixture\n'
+            return Mock(returncode=0, stdout=stdout, stderr='')
+
+        def interrupt(_relay):
+            signal.raise_signal(signum)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run_bw.cross, 'Endpoint', Endpoint), \
+                patch.object(run_bw.Relay, 'run', interrupt), \
+                patch.object(run_bw.subprocess, 'run', remote), \
+                patch('builtins.print'):
+            code = run_bw.main(BASE_ARGS + ['--ops', 'write', '--sizes', '4096', '--depths', '1',
+                                            '--qps', '1', '--initiators', 'mac', '--repeats', '1',
+                                            '--output', str(Path(directory) / 'sweep')])
+            manifest = json.loads((Path(directory) / 'sweep' / 'manifest.json').read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(len(endpoints), 2)
+        self.assertTrue(all(endpoint.stopped for endpoint in endpoints))
+        self.assertIn(signal.Signals(signum).name, manifest['errors'][-1])
+
+    def test_sigterm_routes_through_endpoint_cleanup(self):
+        self.run_interrupted(signal.SIGTERM)
+
+    def test_sighup_routes_through_endpoint_cleanup(self):
+        self.run_interrupted(signal.SIGHUP)
+
+    def test_surviving_endpoint_makes_run_nonzero(self):
+        endpoints = []
+
+        class Endpoint:
+            def __init__(self, host, _command, _log):
+                self.host = host
+                self.process = Mock()
+                self.process.stdout.fileno.return_value = 1
+                endpoints.append(self)
+
+            def stop(self):
+                raise run_bw.cross.EndpointCleanupError(
+                    f'{self.host}: endpoint pid 4321 survived stdin close, 15s wait, SIGTERM, and 5s wait')
+
+        def remote(command, **_kwargs):
+            target = command[-1]
+            stdout = ''
+            if 'gid_attrs/types/' in target:
+                stdout = 'RoCE v2\n'
+            elif 'gid_attrs/ndevs/' in target:
+                stdout = 'enp9s0\n'
+            elif 'sha256sum ' in target or 'shasum -a 256 ' in target:
+                stdout = 'a' * 64 + '  fixture\n'
+            return Mock(returncode=0, stdout=stdout, stderr='')
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(run_bw.cross, 'Endpoint', Endpoint), \
+                patch.object(run_bw.Relay, 'run', side_effect=RuntimeError('offline stop')), \
+                patch.object(run_bw.subprocess, 'run', remote), \
+                patch('builtins.print'):
+            output = Path(directory) / 'sweep'
+            code = run_bw.main(BASE_ARGS + ['--ops', 'write', '--sizes', '4096', '--depths', '1',
+                                            '--qps', '1', '--initiators', 'mac', '--repeats', '1',
+                                            '--output', str(output)])
+            manifest = json.loads((output / 'manifest.json').read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(len(endpoints), 2)
+        self.assertIn('cleanup failed', ' '.join(manifest['runs'][0]['errors']))
+        self.assertIn('pid 4321 survived', ' '.join(manifest['runs'][0]['errors']))
 
     def test_descriptor_validation(self):
         good = ('ENDPOINT v=1 nonce=7 role=initiator op=write bytes=65536 depth=16 qps=2 cqpq=0 cqe=31 total=67108864 '
