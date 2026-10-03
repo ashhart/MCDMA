@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import selectors
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -33,6 +34,25 @@ SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8']
 OPS = ('write', 'read', 'send')
 INITIATORS = ('mac', 'peer')
 CSV_PREFIX = ['initiator', 'round', 'mode_confirmed']
+
+
+class CleanupSignals:
+    """Turn external termination into the same cleanup path as interruption."""
+
+    SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+    def install(self):
+        self.previous = {signum: signal.getsignal(signum) for signum in self.SIGNALS}
+        for signum in self.SIGNALS:
+            signal.signal(signum, self._interrupt)
+
+    def restore(self):
+        for signum, handler in self.previous.items():
+            signal.signal(signum, handler)
+
+    @staticmethod
+    def _interrupt(signum, _frame):
+        raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
 def parse_list(text, kind, allowed=None, low=None, high=None):
@@ -378,6 +398,8 @@ def main(argv=None):
             raise RuntimeError('Linux peer needs the Mac static IPv6 neighbour before QP connection')
 
     exit_code = 0
+    cleanup_signals = CleanupSignals()
+    cleanup_signals.install()
     try:
         for item in plan:
             name = config_name(item)
@@ -407,7 +429,7 @@ def main(argv=None):
                         record[f'{"mac" if endpoint.host == args.mac_host else "peer"}_returncode'] = code
                         if code:
                             errors.append(f'{endpoint.host}: exit {code}')
-                    except (OSError, subprocess.SubprocessError) as error:
+                    except (OSError, cross.EndpointCleanupError, subprocess.SubprocessError) as error:
                         errors.append(f'{endpoint.host}: cleanup failed: {error}')
             stderr = ''.join(entry.get('endpoint_stderr', '') for entry in log if entry.get('host') == args.mac_host)
             cqs = item['qps'] if item['cq_per_qp'] else 1
@@ -435,9 +457,12 @@ def main(argv=None):
             manifest['runs'].append(record)
             if errors:
                 break
-    except KeyboardInterrupt:
-        manifest['errors'].append('interrupted')
+    except KeyboardInterrupt as error:
+        detail = str(error)
+        manifest['errors'].append('interrupted' + (f': {detail}' if detail else ''))
         exit_code = 1
+    finally:
+        cleanup_signals.restore()
     for csv_path in sorted(args.output.glob('*.csv')):
         manifest['csv_sha256'][csv_path.name] = sha256_file(csv_path)
     write_manifest()
