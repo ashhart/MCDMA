@@ -12,6 +12,7 @@ int main() {
     CHECK(d.major==16 && d.minor==35 && d.patch==8008 && d.command_revision==5);
     CHECK(d.pci_revision==7 && d.log_slots==5 && d.log_stride==6);
     auto bad=r; bad.identity=0x101515b3; CHECK(inspect(bad,d)==Error::wrong_device);
+    bad=r; bad.identity=pci_identity_non_ex; CHECK(inspect(bad,d)==Error::none);
     bad=r; bad.identity=UINT32_MAX; CHECK(inspect(bad,d)==Error::removed);
     bad=r; bad.initializing=0x80000000; CHECK(inspect(bad,d)==Error::initializing);
     bad=r; bad.interface_version=0x60000; CHECK(inspect(bad,d)==Error::command_revision);

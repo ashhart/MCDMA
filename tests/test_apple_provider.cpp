@@ -149,7 +149,7 @@ void emit(Session &s,uint32_t consumer,uint16_t counter,uint8_t opcode=0,uint8_t
     entry[55]=syndrome; entry[63]=uint8_t((opcode<<4)|((consumer>>5)&1));
 }
 void device_identity() {
-    for (const uint16_t part : {uint16_t(0x1019),uint16_t(0x1015)}) {
+    for (const uint16_t part : {uint16_t(0x1019),uint16_t(0x1017),uint16_t(0x1015)}) {
         reset(); sim.device_id=part; Hca hca; AppleProvider provider;
         assert(hca.start() && provider.prepare(hca));
         alignas(8) uint8_t attr[0x130]{};
@@ -158,7 +158,7 @@ void device_identity() {
         assert(provider.dispose() && hca.stop());
         assert(hca.transport.vendor_id()==0 && hca.transport.device_id()==0);
     }
-    reset(); sim.device_id=0x1017; Hca unsupported; assert(!unsupported.start());
+    reset(); sim.device_id=0x101f; Hca unsupported; assert(!unsupported.start());
     reset();
 }
 void callbacks_and_protection() {
