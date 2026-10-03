@@ -95,7 +95,7 @@ Error inspect(const Registers &r, Device &d) {
     if (r.identity == UINT32_MAX || r.firmware == UINT32_MAX ||
         r.interface_version == UINT32_MAX || r.queue_geometry == UINT32_MAX ||
         r.initializing == UINT32_MAX) return Error::removed;
-    if (r.identity != pci_identity) return Error::wrong_device;
+    if (r.identity != pci_identity && r.identity != pci_identity_non_ex) return Error::wrong_device;
     if (r.initializing & 0x80000000u) return Error::initializing;
     if ((r.interface_version >> 16) != 5) return Error::command_revision;
     const unsigned slots = (r.queue_geometry >> 4) & 15;
