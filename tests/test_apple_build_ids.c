@@ -4,7 +4,7 @@
 #include <string.h>
 
 int main(void) {
-    const char *valid[] = {"26A5425a", "26A428", "26B5101f"};
+    const char *valid[] = {"26A5425a", "26A428", "26B5101f", "26A434"};
     for (size_t n = 0; n < sizeof(valid) / sizeof(valid[0]); ++n) {
         const size_t bytes = strlen(valid[n]) + 1;
         const char *result = mcdma_verified_apple_build(valid[n], bytes);
@@ -35,6 +35,9 @@ int main(void) {
     assert(!mcdma_verified_apple_build("26A428\0x", sizeof("26A428\0x")));
     assert(!mcdma_verified_apple_build("26B5101", sizeof("26B5101")));
     assert(!mcdma_verified_apple_build("26B5101g", sizeof("26B5101g")));
+    assert(!mcdma_verified_apple_build("26A433", sizeof("26A433")));
+    assert(!mcdma_verified_apple_build("26A435", sizeof("26A435")));
+    assert(!mcdma_verified_apple_build("26A434a", sizeof("26A434a")));
     puts("PASS exact audited beta/release build IDs, malformed lengths, terminators and near-miss rejection");
     return 0;
 }

@@ -9,7 +9,8 @@ static inline const char *mcdma_verified_apple_build(const char *build, size_t b
     // see the private build-26A428-audit evidence retained with this work.
     // 26B5101f (27.2 beta) was compared against 26A428; see
     // docs/build-26B5101f.md and tools/compare-apple-build.py.
-    static const char *const verified[] = {"26A5425a", "26A428", "26B5101f"};
+    // 26A434 (27.0.1) was compared against 26A428 the same way; see docs/build-26A434.md.
+    static const char *const verified[] = {"26A5425a", "26A428", "26B5101f", "26A434"};
     if (!build) return NULL;
     for (size_t entry = 0; entry < sizeof(verified) / sizeof(verified[0]); ++entry) {
         const char *known = verified[entry];
