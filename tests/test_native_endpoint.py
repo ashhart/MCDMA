@@ -3,8 +3,9 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 spec = importlib.util.spec_from_file_location('native_cross_host', Path(__file__).resolve().parents[1]/'tools/native_cross_host.py')
 module = importlib.util.module_from_spec(spec)
@@ -51,6 +52,45 @@ class EndpointTests(unittest.TestCase):
                 endpoint.line(timeout=5)
             self.assertEqual(endpoint.stop(), 0)
         self.assertEqual(log[-1]['endpoint_stderr'], 'firmware failure\n')
+
+    def mocked_endpoint(self, waits):
+        endpoint = object.__new__(module.Endpoint)
+        endpoint.host = 'offline-child'
+        endpoint.log = []
+        endpoint.pending = b''
+        endpoint.stderr_data = bytearray()
+        endpoint.stderr_overflow = False
+        endpoint.stderr_error = None
+        endpoint.stderr_stop = threading.Event()
+        endpoint.stderr_thread = Mock()
+        endpoint.stderr_thread.is_alive.return_value = False
+        endpoint.process = Mock()
+        endpoint.process.pid = 4321
+        endpoint.process.wait.side_effect = waits
+        return endpoint
+
+    def test_stop_normal_exit_never_forces_kill(self):
+        endpoint = self.mocked_endpoint([0])
+        self.assertEqual(endpoint.stop(), 0)
+        endpoint.process.wait.assert_called_once_with(timeout=15)
+        endpoint.process.terminate.assert_not_called()
+        endpoint.process.kill.assert_not_called()
+
+    def test_stop_timeout_uses_sigterm_then_exits_nonzero(self):
+        endpoint = self.mocked_endpoint([subprocess.TimeoutExpired('ssh', 15), 143])
+        self.assertEqual(endpoint.stop(), -1)
+        self.assertEqual(endpoint.process.wait.call_args_list, [call(timeout=15), call(timeout=5)])
+        endpoint.process.terminate.assert_called_once_with()
+        endpoint.process.kill.assert_not_called()
+
+    def test_stop_surviving_child_reports_pid_and_never_forces_kill(self):
+        endpoint = self.mocked_endpoint([
+            subprocess.TimeoutExpired('ssh', 15), subprocess.TimeoutExpired('ssh', 5)])
+        with self.assertRaisesRegex(module.EndpointCleanupError, 'pid 4321 survived.*SIGTERM'):
+            endpoint.stop()
+        self.assertEqual(endpoint.process.wait.call_args_list, [call(timeout=15), call(timeout=5)])
+        endpoint.process.terminate.assert_called_once_with()
+        endpoint.process.kill.assert_not_called()
 
 
 if __name__ == '__main__':

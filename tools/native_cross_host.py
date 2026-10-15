@@ -48,6 +48,10 @@ def ndp_has_neighbor(output, gid, interface, address):
     return False
 
 
+class EndpointCleanupError(RuntimeError):
+    """An endpoint survived every permitted bounded cleanup step."""
+
+
 class Endpoint:
     STDERR_LIMIT = 1024 * 1024
 
@@ -114,6 +118,7 @@ class Endpoint:
         self.process.stdin.flush()
 
     def stop(self):
+        cleanup_error = None
         try:
             self.process.stdin.close()
         except BrokenPipeError:
@@ -125,8 +130,9 @@ class Endpoint:
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
+                cleanup_error = EndpointCleanupError(
+                    f'{self.host}: endpoint pid {self.process.pid} survived stdin close, '
+                    '15s wait, SIGTERM, and 5s wait')
             code = -1
         # Preserve CQ/posting diagnostics even when the endpoint returned a
         # well-formed failure response before exiting.
@@ -143,6 +149,8 @@ class Endpoint:
         if stderr:
             self.log.append({'host': self.host, 'endpoint_stderr': stderr})
             print(f'{self.host}: {stderr.strip()}', flush=True)
+        if cleanup_error is not None:
+            raise cleanup_error
         return code
 
 
