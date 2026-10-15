@@ -199,6 +199,63 @@ class ResponderTests(unittest.TestCase):
         self.assertEqual(table.take_finished(), {'req-9'})
 
 
+class ChecksumTests(unittest.TestCase):
+    """The responder prefers python-isal's CRC-32 and falls back to zlib's; both must match the wire format."""
+
+    def _reloaded_responder(self, block_isal):
+        import importlib
+        from mcdma_kv import responder
+        saved = {name: sys.modules.get(name) for name in ('isal', 'isal.isal_zlib')}
+        if block_isal:
+            sys.modules['isal'] = None
+            sys.modules['isal.isal_zlib'] = None
+        try:
+            return importlib.reload(responder)
+        finally:
+            for name, module in saved.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+    def tearDown(self):
+        import importlib
+        from mcdma_kv import responder
+        importlib.reload(responder)
+
+    def _serve_one_frame(self, module):
+        table = module.ExportTable(ttl_s=60, clock=lambda: 0.0)
+        mailbox = _Mailbox()
+        responder = module.Responder(mailbox, table, _pattern, model='org/model', tp_rank=1, tp_size=2)
+        table.add(HANDOFF, 'req-1', _export())
+        responder.handle(7, _request(wire.OPEN, payload=b'{"checksum": true}'))
+        responder.handle(7, _request(wire.PULL, 0))
+        _, data = mailbox.replies[-1]
+        header = wire.unpack(data)
+        return header, wire.body(data, header)
+
+    def test_without_isal_the_responder_uses_zlib(self):
+        module = self._reloaded_responder(block_isal=True)
+        self.assertIs(module._crc32, zlib.crc32)
+        header, payload = self._serve_one_frame(module)
+        self.assertEqual((header.flags & wire.CHECKED, header.crc), (wire.CHECKED, zlib.crc32(payload)))
+
+    def test_with_isal_the_frame_crc_still_matches_zlib(self):
+        try:
+            from isal import isal_zlib
+        except ImportError:
+            self.skipTest('python-isal is not installed')
+        module = self._reloaded_responder(block_isal=False)
+        self.assertIs(module._crc32, isal_zlib.crc32)
+        header, payload = self._serve_one_frame(module)
+        self.assertEqual(header.crc, zlib.crc32(payload))
+        data = bytearray(os.urandom(1 << 20))
+        view = memoryview(data)
+        for sample in (b'', b'123456789', bytes(data), data, view, view[128:], view[128:].toreadonly()):
+            self.assertEqual(module._crc32(sample), zlib.crc32(sample))
+        self.assertEqual(module._crc32(b'123456789'), 0xcbf43926)
+
+
 @unittest.skipUnless(shutil.which('cc'), 'C compiler required')
 class MailboxTests(unittest.TestCase):
     """The real mailbox class over a file mailbox, with a stand-in daemon socket."""
