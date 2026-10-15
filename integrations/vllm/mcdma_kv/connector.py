@@ -25,11 +25,18 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorRole,
 )
 
+try:  # vLLM builds with the hybrid KV cache manager; hybrid models need it.
+    from vllm.distributed.kv_transfer.kv_connector.v1.base import SupportsHMA
+except ImportError:  # pragma: no cover - older vLLM
+    class SupportsHMA:  # type: ignore[no-redef]
+        pass
+
+from . import hybrid
 from .export import DTYPES, Export, LayerPages, geometry
 from .mailbox import MailboxError, ServiceMailbox
 from .responder import ExportTable, Responder
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vllm.mcdma_kv.connector")
 _LAYER = re.compile(r"layers\.(\d+)\.")
 # How long the serving thread waits before attaching again to a daemon that is not up.
 _REATTACH_S = 5.0
@@ -63,7 +70,7 @@ def _tensor_parallel() -> tuple[int, int]:
         return 0, 1
 
 
-class MCDMAKVConnector(KVConnectorBase_V1):
+class MCDMAKVConnector(KVConnectorBase_V1, SupportsHMA):
     """Producer side of the MCDMA KV handoff."""
 
     def __init__(self, vllm_config: Any, role: KVConnectorRole, kv_cache_config: Any = None) -> None:
@@ -81,6 +88,17 @@ class MCDMAKVConnector(KVConnectorBase_V1):
                         for name in group.layer_names}
         self._specs = [group.kv_cache_spec for group in kv_cache_config.kv_cache_groups]
         self._num_blocks = int(kv_cache_config.num_blocks)
+        # Hybrid models (Gated DeltaNet + QSA, Qwen3.8 Flash Next) export whole-prefix state.
+        self._hybrid = hybrid.is_hybrid(self._specs)
+        self._text_config = model_config.hf_text_config
+        self._recorder = hybrid.IndexKeyRecorder(int(model_config.max_model_len)) if self._hybrid else None
+        # With MTP speculative decoding the drafter's cache is prompt history the decoder's head can reuse.
+        speculative = getattr(vllm_config, "speculative_config", None)
+        self._hidden = (hybrid.HiddenRecorder()
+                        if self._hybrid and speculative is not None and "mtp" in str(speculative.method) else None)
+        self._spec = int(getattr(speculative, "num_speculative_tokens", 0) or 0) if speculative is not None else 0
+        # Exports held until get_finished, by when the step's MTP drafter has written its cache.
+        self._deferred: list[HandoffRequest] = []
         # Scheduler side: requests being prefilled, and requests whose blocks the handoff holds.
         self._tracked: dict[str, HandoffRequest] = {}
         self._holding: set[str] = set()
@@ -90,6 +108,17 @@ class MCDMAKVConnector(KVConnectorBase_V1):
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._stream: torch.cuda.Stream | None = None
+
+    @classmethod
+    def supports_aligned_hybrid_transfer(cls, config: Any) -> bool:
+        """vLLM builds that guard QSA models accept export-only producers under aligned retention.
+
+        That guard protects connectors that import recurrent state into vLLM. This one never
+        imports: it copies each handoff's state out at the end of its prefill, so the retention
+        policy (and, with prefix caching off, no retention at all) cannot affect what it exports.
+        """
+        transfer = getattr(config, "kv_transfer_config", None)
+        return getattr(transfer, "kv_role", None) == "kv_producer"
 
     # Scheduler side -------------------------------------------------------
 
@@ -153,6 +182,10 @@ class MCDMAKVConnector(KVConnectorBase_V1):
         # A handoff's blocks stay allocated until the worker reports it closed.
         return request.request_id in self._holding, None
 
+    def request_finished_all_groups(self, request: Any,
+                                    block_ids: tuple[list[int], ...]) -> tuple[bool, dict[str, Any] | None]:
+        return self.request_finished(request, [])
+
     def update_connector_output(self, connector_output: Any) -> None:
         for request_id in getattr(connector_output, "finished_sending", None) or ():
             self._holding.discard(request_id)
@@ -164,6 +197,14 @@ class MCDMAKVConnector(KVConnectorBase_V1):
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]) -> None:
         self._caches = kv_caches
+        if self._hybrid:
+            hybrid.install_index_key_hook(self._recorder)
+            if self._hidden is not None:
+                hybrid.install_hidden_hook(self._hidden)
+            for name, tensor in kv_caches.items():
+                group = self._groups.get(name)
+                spec = type(self._specs[group]).__name__ if group is not None else "-"
+                logger.debug("MCDMA handoff cache %s %s %s %s", name, spec, tuple(tensor.shape), tensor.dtype)
         rank, _ = _tensor_parallel()
         if rank >= len(self._links):
             logger.warning("MCDMA handoff: no link for tensor-parallel rank %d", rank)
@@ -186,10 +227,17 @@ class MCDMAKVConnector(KVConnectorBase_V1):
         metadata = self._get_connector_metadata()
         if not isinstance(metadata, MCDMAHandoffMetadata) or not metadata.ready:
             return
+        if self._hidden is not None:
+            # V1's runner calls wait_for_save before the MTP drafter runs; get_finished follows it in V1 and V2.
+            self._deferred.extend(metadata.ready)
+            return
+        self._serve_ready(metadata.ready)
+
+    def _serve_ready(self, requests: list[HandoffRequest]) -> None:
         # Serving reads wait on this event, so they see the pages this step wrote.
         ready = torch.cuda.Event()
         ready.record()
-        for request in metadata.ready:
+        for request in requests:
             try:
                 if request.failed:
                     raise ValueError(request.failed)
@@ -201,6 +249,9 @@ class MCDMAKVConnector(KVConnectorBase_V1):
                 self._table.add(request.handoff, request.request_id, export)
 
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str] | None, set[str] | None]:
+        if self._deferred:
+            requests, self._deferred = self._deferred, []
+            self._serve_ready(requests)
         return self._table.take_finished() or None, None
 
     def shutdown(self) -> None:
@@ -209,6 +260,16 @@ class MCDMAKVConnector(KVConnectorBase_V1):
             self._thread.join(timeout=5)
 
     def _export(self, request: HandoffRequest, ready: Any) -> Export:
+        if self._hybrid:
+            if request.export_from:
+                raise ValueError("hybrid handoffs export the whole prefix; ask with export_from 0")
+            entries = hybrid.export_entries(self._caches, self._groups, self._specs, request.block_ids,
+                                            len(request.tokens), self._recorder, self._text_config, self._hidden,
+                                            self._spec)
+            # The snapshots were taken on this stream; serving waits for them.
+            done = torch.cuda.Event()
+            done.record()
+            return Export(request.request_id, request.handoff, request.tokens, 0, 1, entries, ready=done)
         layers, per_row = [], None
         for name, tensor in self._caches.items():
             found = _LAYER.search(name)

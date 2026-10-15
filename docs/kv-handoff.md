@@ -40,8 +40,53 @@ records an export of its pages from `export_from` on, rounded down to a page row
 allocated. The rank's serving thread then answers the decoder over its link. Blocks are released when the decoder
 closes the handoff, or after `export_ttl_s`.
 
-Supported caches: full attention and MLA layers in bf16, fp16 or fp32. Sliding-window, Mamba and fp8 caches are
-refused with an explanation the decoder receives.
+Supported caches: full attention and MLA layers in bf16, fp16 or fp32, and the hybrid layers of Qwen3.8 Flash Next
+(below). Sliding-window, other Mamba-type and fp8 caches are refused with an explanation the decoder receives.
+
+## Hybrid models
+
+Qwen3.8 Flash Next mixes 36 Gated DeltaNet layers with 12 QSA sparse-attention layers, and carries a PLE short-conv
+state on one layer. A recurrent state exists only for a whole prefix, so a hybrid handoff always covers prompt tokens
+`[0, T)`: ask with `export_from` 0. The manifest's `layers` are then named entries rather than page arrays, each with
+`kind`, the model `layer`, a `name`, and a fixed layout that does not depend on vLLM's own:
+
+| kind | name | shape | dims | contents |
+| --- | --- | --- | --- | --- |
+| `qsa` | `k`, `v` | `[T, kv_heads, head_dim]` | `block, head, head_dim` | keys post-RoPE and values, as cached |
+| `qsa` | `index_keys` | `[T, indexer_head_dim]` | `block, index_dim` | raw index keys, pre-norm and pre-RoPE |
+| `gdn` | `conv` | `[conv_kernel - 1, conv_dim]` | `block, channel` | conv state, oldest tap first, channels q, k, v |
+| `gdn` | `ssm` | `[v_heads, v_dim, k_dim]` | `block, v_dim, k_dim` | recurrent state, float32 |
+| `ple` | `conv` | `[(kernel - 1) * dilation, hc_dim]` | `block, channel` | PLE short-conv state, oldest tap first |
+| `mtp` | `k`, `v` | `[T - 1, kv_heads, head_dim]` | `block, head, head_dim` | the MTP head's QSA layer, as for `qsa` |
+| `mtp` | `index_keys` | `[T - 1, indexer_head_dim]` | `block, index_dim` | its raw index keys |
+| `mtp` | `hidden` | `[1, hc_count * hidden_size]` | `block, hidden` | target hidden state of token `T - 1`, all streams |
+
+`first_token` is 0 and `block_size` 1. A DATA frame's `layer` field is the entry's `index`, and its rows run along the
+entry's first dimension. Text-only prompts index positions `0 .. T-1`, and the PLE layer's n-gram context is the
+prompt's last tokens, so the decoder rebuilds both.
+
+vLLM keeps raw index keys only for a QSA layer's last four tokens, so the connector wraps the layer's run and copies
+each prefill chunk's keys out by position. That needs one request in flight at a time, and the hybrid KV cache
+manager. Run the producer on a vLLM build with Flash Next support (the b12x Spark build was used) with:
+
+```bash
+--max-num-seqs 1 --no-enable-prefix-caching --kv-cache-dtype auto --recurrent-checkpoint-policy aligned
+```
+
+With `--no-enable-prefix-caching` each request keeps one private recurrent-state block, which the connector holds
+until the decoder closes the handoff. Every entry is copied into private tensors on the step that finishes the
+prefill, about 115 MB of fixed state plus 27 KB per prompt token.
+
+The `mtp` entries let a decoder that drafts with the model's MTP head start with the whole prompt in the head's
+cache. They exist when the producer also runs MTP speculative decoding,
+`--speculative-config '{"method":"mtp","num_speculative_tokens":1}'`: its drafter caches one QSA layer (model layer
+`num_hidden_layers`) whose row `t` pairs the target's hidden state at `t` with prompt token `t + 1`. Rows `[0, T - 1)`
+are prompt history; row `T - 1` pairs with vLLM's own sampled token and is left out, and the hidden state of token
+`T - 1` comes instead, for the decoder to pair with its own next token. The connector records that hidden state
+from the speculator's `propose` call, and with MTP on it exports in `get_finished`, which follows the drafter in both
+model runners (V1 calls `wait_for_save` before it). Speculative decoding also widens each Gated DeltaNet and PLE conv
+window by one slot per speculative token; prefill fills the first slots, and the export carries only those. About
+2.3 KB per prompt token more.
 
 ## Protocol 1
 

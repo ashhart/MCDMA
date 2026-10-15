@@ -13,7 +13,7 @@ from typing import Any
 from . import wire
 from .export import Export, plan_frames
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vllm.mcdma_kv.responder")
 _NO_HANDOFF = bytes(16)
 
 
