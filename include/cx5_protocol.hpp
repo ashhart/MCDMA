@@ -5,6 +5,7 @@
 
 namespace cx5 {
 constexpr uint32_t pci_identity = 0x101915b3;
+constexpr uint32_t pci_identity_non_ex = 0x101715b3;   // ConnectX-5 without Ex: the same command interface
 constexpr size_t command_bytes = 64;
 constexpr size_t mailbox_data_bytes = 512;
 constexpr size_t mailbox_record_bytes = 576;

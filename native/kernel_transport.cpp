@@ -207,6 +207,11 @@ IOReturn Transport::open() {
     auto result = queue_.allocate(mapper_, 65536);
     if (result) return result;
     publish_dma();
+    // Enable memory space and bus mastering before handing the queue address
+    // to firmware, as Linux mlx5 does. A ConnectX-5 (15b3:1017) leaves the
+    // address unlatched otherwise; the CX5 Ex accepted either order.
+    pci_->configWrite16(4, saved_command_ | 2 | 4);
+    if (!(pci_->configRead16(4) & 4)) return kIOReturnNotReady;
     if (!write32(0x10, uint32_t(queue_.dma >> 32)) ||
         !write32(0x14, uint32_t(queue_.dma))) {
         quarantined = true; return kIOReturnNoDevice;
@@ -214,8 +219,6 @@ IOReturn Transport::open() {
     bound_ = true;
     if (read32(0x10) != uint32_t(queue_.dma >> 32) ||
         (read32(0x14) & 0xfffff000) != uint32_t(queue_.dma)) return kIOReturnIOError;
-    pci_->configWrite16(4, saved_command_ | 2 | 4);
-    if (!(pci_->configRead16(4) & 4)) return kIOReturnNotReady;
     for (unsigned i = 0; i < 1000; ++i) {
         if (!(read32(0x1fc) & 0x80000000)) return kIOReturnSuccess;
         IOSleep(1);
