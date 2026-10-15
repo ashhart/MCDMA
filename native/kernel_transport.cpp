@@ -2,6 +2,7 @@
 #include "apple_build.hpp"
 #include "command_wait.hpp"
 #include "cx5_device.h"
+#include "command_queue_ownership.hpp"
 #include <libkern/OSByteOrder.h>
 #include <libkern/c++/OSString.h>
 #include <string.h>
@@ -9,7 +10,7 @@
 
 namespace cx5_native {
 IOReturn Buffer::allocate(IOMapper *mapper, uint64_t bytes) {
-    if (memory || mapping || !mapper || !bytes || bytes > 64 * 1024 * 1024)
+    if (memory || mapping || !mapper || !bytes || bytes > max_allocation_bytes)
         return kIOReturnBadArgument;
     size = (bytes + 16383) & ~uint64_t(16383);
     memory = IOBufferMemoryDescriptor::withOptions(kIODirectionInOut, size, 16384);
@@ -202,7 +203,7 @@ IOReturn Transport::open() {
     pci_->setProperty("MCDMANativeCommandQueueHigh",high,32);
     pci_->setProperty("MCDMANativeCommandQueueLow",low,32);
     if (high==UINT32_MAX || low==UINT32_MAX) return kIOReturnNoDevice;
-    if (high || (low & 0xfffff000)) return kIOReturnBusy;
+    if (!command_queue_available(high,low)) return kIOReturnBusy;
     auto result = queue_.allocate(mapper_, 65536);
     if (result) return result;
     publish_dma();

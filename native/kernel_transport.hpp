@@ -18,6 +18,7 @@ namespace cx5_native {
 // Kernel allocation and IOMMU mapping remain distinct; never use CPU virtual
 // or physical addresses as device addresses on Apple Silicon.
 struct Buffer {
+    static constexpr uint64_t max_allocation_bytes = 64ull * 1024 * 1024;
     IOBufferMemoryDescriptor *memory = nullptr;
     IODMACommand *mapping = nullptr;
     uint8_t *cpu = nullptr;

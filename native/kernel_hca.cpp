@@ -28,21 +28,34 @@ bool Hca::destroy(HardwareObject &object,uint16_t opcode) {
     object={}; --transport.resources; return true;
 }
 bool Hca::provide(Pool &p,uint16_t phase) {
+    startup_page_phase=phase;
+    startup_page_step=1; // QUERY_PAGES
+    startup_page_count=0;
     if (!simple(0x107,phase)) return false;
     const int32_t count=int32_t(cx5::read_be32(output_+12));
-    if (count<0 || uint32_t(count)>max_pages || p.buffer.memory) return false;
+    startup_page_count=count;
+    startup_page_step=2; // Validate the firmware's signed page request.
+    if (count<0 || uint32_t(count)>max_pages || p.buffer.memory) {
+        startup_error=kIOReturnBadArgument;
+        return false;
+    }
     p.count=uint32_t(count); p.function=uint16_t(cx5::read_be32(output_+8));
-    if (!p.count) return true;
-    if (p.buffer.allocate(transport.mapper(),uint64_t(p.count)*4096)) return false;
+    if (!p.count) { startup_page_step=0; startup_page_phase=0; return true; }
+    startup_page_step=3; // Allocate and map the original page pool.
+    const IOReturn allocated=p.buffer.allocate(transport.mapper(),uint64_t(p.count)*4096);
+    if (allocated) { startup_error=allocated; return false; }
     for (uint32_t offset=0;offset<p.count;) {
         uint32_t batch=p.count-offset; if (batch>256) batch=256;
+        startup_page_step=4; // MANAGE_PAGES give command.
         header(0x108,1); cx5::write_be32(input_+8,p.function); cx5::write_be32(input_+12,batch);
         for (uint32_t j=0;j<batch;++j)
             cx5::write_be64(input_+16+j*8,p.buffer.dma+uint64_t(offset+j)*4096);
         if (!call(16+batch*8)) return false;
-        for (uint32_t j=0;j<batch;++j) p.given[offset+j]=true;
+        for (uint32_t j=0;j<batch;++j) p.mark_given(offset+j);
         p.owned+=batch; offset+=batch;
     }
+    startup_page_step=0;
+    startup_page_phase=0;
     return true;
 }
 bool Hca::reclaim(Pool &p) {
@@ -59,10 +72,10 @@ bool Hca::reclaim(Pool &p) {
             for (Pool *candidate:pools)
                 if (candidate->function==p.function && dma>=candidate->buffer.dma &&
                     dma-candidate->buffer.dma<uint64_t(candidate->count)*4096 && !(dma&4095)) owner=candidate;
-            if (!owner || !owner->given[(dma-owner->buffer.dma)/4096]) {
+            if (!owner || !owner->take_given(uint32_t((dma-owner->buffer.dma)/4096))) {
                 transport.quarantined=true; return false;
             }
-            owner->given[(dma-owner->buffer.dma)/4096]=false; --owner->owned;
+            --owner->owned;
         }
     }
     return p.owned==0;
@@ -73,10 +86,16 @@ bool Hca::attach_and_start(IOPCIDevice *device, IOService *owner) {
     return !startup_error && start();
 }
 bool Hca::start() {
+    startup_page_phase=startup_page_step=0;
+    startup_page_count=0;
     blueflame_capable=blueflame_enabled=user_blueflame=false;
     blueflame_buffer_bytes=0; blueflame_posts=0;
     startup_error=transport.open();
-    if (startup_error || !simple(0x104) || !simple(0x10a,0,112) || !(output_[111]&2)) return false;
+    if (startup_error) return false;
+    // A successful command can still be followed by a local validation or
+    // allocation failure; never publish a zero startup error in that case.
+    startup_error=kIOReturnIOError;
+    if (!simple(0x104) || !simple(0x10a,0,112) || !(output_[111]&2)) return false;
     header(0x10b); cx5::write_be32(input_+8,1);
     if (!call() || !provide(boot_,1) || !simple(0x100,1,4112)) return false;
     uar_shift_=12+uint32_t(cx5::get_bits(output_+16,4096,0x490,16));
@@ -115,7 +134,9 @@ bool Hca::start() {
     header(0x301);
     cx5::set_bits(input_+16,64,0x63,5,5); cx5::set_bits(input_+16,64,0x68,24,uar_page_index(uar_));
     cx5::write_be64(input_+0x110,eq_buffer_.dma);
-    return create(eq_,0x118) && configure_roce();
+    if (!create(eq_,0x118) || !configure_roce()) return false;
+    startup_error=kIOReturnSuccess;
+    return true;
 }
 bool Hca::configure_uar_pages() {
     // output_ holds the current general capabilities just queried. Request

@@ -371,6 +371,10 @@ static void command_lock_decoupling() {
     reset(); Hca hca; AppleProvider provider;
     assert(hca.start() && provider.prepare(hca));
     Session s; s.open(provider); s.resources(); s.connect(hca);
+    // Establish a real ready/port-query baseline before injecting the blocked
+    // sampler, so an unrelated startup failure cannot leave the gate unsignaled.
+    assert(hca.transport.ready() && hca.transport.initialized);
+    bool baseline_active=false; assert(provider.sample_port(baseline_active));
     sim.port_gate=true;
     std::thread sampler([&]{ bool active=false; assert(provider.sample_port(active)); });
     sim.port_arrived.get_future().wait();
