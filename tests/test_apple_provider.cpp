@@ -117,14 +117,14 @@ struct Session {
         memcpy(gid+0x10,hca.gid,16); put<uint32_t>(gid,0x20,2); put<uint32_t>(gid,0x28,1);
         put<void *>(attr,0x40,gid); attr[0x48]=0xfe; attr[0x49]=0x80;
         attr[0x5d]=resolved_hop_limit; put<uint32_t>(attr,0x64,1); attr[0x68]=1;
-        put<uint32_t>(attr,0x6c,2); attr[0x70]=2; attr[0xb7]=1; attr[0xc0]=9;
+        put<uint32_t>(attr,0x6c,2); attr[0x70]=2; attr[0xb7]=1; attr[0xb8]=9;
         assert(AppleProvider::modify_qp(qp,attr,1|128|256|1048576|4096|131072|32768,udata)==0);
         assert(cx5::get_bits(sim.command.data()+24,232,0x40,3)==mtu);
         assert(cx5::get_bits(sim.command.data()+24,232,0x4a3,5)==9);
         assert(cx5::get_bits(sim.command.data()+24+24,44,0x58,8)==
                (resolved_hop_limit?resolved_hop_limit:64));
         put<uint32_t>(attr,0,3); put<uint32_t>(attr,0x18,0x654321);
-        attr[0xb6]=1; attr[0xb8]=6; attr[0xc1]=13; attr[0xc2]=5;
+        attr[0xb6]=1; attr[0xb8]=0; attr[0xc0]=13; attr[0xc1]=5; attr[0xc2]=6;
         assert(AppleProvider::modify_qp(qp,attr,1|512|1024|2048|65536|8192,udata)==0);
         assert(cx5::get_bits(sim.command.data()+24,232,0x38d,3)==5);
         assert(cx5::get_bits(sim.command.data()+24,232,0x390,3)==6);

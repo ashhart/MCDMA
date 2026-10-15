@@ -651,8 +651,9 @@ int AppleProvider::modify_qp(void *core,void *attr,int mask,void *udata) {
             read<uint8_t>(attr,0x68)!=1 || read<uint8_t>(attr,0x5c)!=0 ||
             read<uint8_t>(attr,0xb7)!=1 || read<uint8_t>(attr,0x5e) || read<uint32_t>(attr,0x58)) return -EOPNOTSUPP;
         const auto path_mtu=read<uint32_t>(attr,8);
-        if (!path_mtu || path_mtu>Hca::roce_mtu(p->hca_->ethernet_mtu) || read<uint8_t>(attr,0xc0)>31) return -EINVAL;
-        connection.path_mtu=uint8_t(path_mtu); connection.min_rnr_timer=read<uint8_t>(attr,0xc0);
+        // ib_qp_attr: min_rnr_timer 0xb8, port_num(u32) 0xbc, timeout 0xc0, retry_cnt 0xc1, rnr_retry 0xc2.
+        if (!path_mtu || path_mtu>Hca::roce_mtu(p->hca_->ethernet_mtu) || read<uint8_t>(attr,0xb8)>31) return -EINVAL;
+        connection.path_mtu=uint8_t(path_mtu); connection.min_rnr_timer=read<uint8_t>(attr,0xb8);
         // 26A5425a's unicast resolver overwrites the caller's hop limit with
         // zero on this directly connected route. Preserve our RC default (64)
         // for that unspecified result; retain any nonzero resolved value.
@@ -667,8 +668,8 @@ int AppleProvider::modify_qp(void *core,void *attr,int mask,void *udata) {
             (connection.remote_mac[0]&1) || !memcmp(connection.remote_mac,"\0\0\0\0\0\0",6)) return -EINVAL;
     } else {
         if (flags!=(state|timeout|retry|rnr|sqpsn|rdatomic) || read<uint8_t>(attr,0xb6)!=1) return -EOPNOTSUPP;
-        connection.send_psn=read<uint32_t>(attr,0x18); connection.timeout=read<uint8_t>(attr,0xc1);
-        connection.retry_count=read<uint8_t>(attr,0xc2); connection.rnr_retry=read<uint8_t>(attr,0xb8);
+        connection.send_psn=read<uint32_t>(attr,0x18); connection.timeout=read<uint8_t>(attr,0xc0);
+        connection.retry_count=read<uint8_t>(attr,0xc1); connection.rnr_retry=read<uint8_t>(attr,0xc2);
     }
     bool transitioned=false;
     {
