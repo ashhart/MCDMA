@@ -1,9 +1,12 @@
 'use strict';
 const { compareVersions } = require('./version');
+const { requiredBuilds } = require('./driverpkg');
 // Turns the probe results into the setup checklist. Pure: no I/O.
 const STATUS_RANK = { fail: 0, warn: 1, todo: 2, unknown: 3, ok: 4 };
 const worst = (list) => list.reduce((w, s) => (STATUS_RANK[s] < STATUS_RANK[w] ? s : w), 'ok');
 
+// A malformed build requirement matches no build rather than none being required.
+function requiredBuildsOf(manifest) { try { return requiredBuilds(manifest && manifest.requires); } catch (e) { return ['invalid']; } }
 function item(label, value, status = 'ok', hint = null) { return { label, value, status, hint }; }
 function action(id, label, opts = {}) { return { id, label, kind: opts.kind || 'normal', primary: !!opts.primary, hint: opts.hint || null }; }
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -12,8 +15,9 @@ function systemCheck(studio, pkg) {
   if (!studio || !studio.ok) return { id: 'system', title: 'macOS & security', status: 'unknown', summary: studio && studio.error ? studio.error : 'Not checked yet', items: [], actions: [] };
   const items = [], actions = [];
   const need = (pkg && pkg.available && pkg.requiresMacOSMajor) || (studio.kext && studio.kext.requiresMacOSMajor) || null;
-  const requiredBuild = pkg && pkg.available && pkg.manifest && pkg.manifest.requires && pkg.manifest.requires.macos_build;
-  const osOk = requiredBuild ? studio.os.build === requiredBuild : need ? studio.os.major >= need : true;
+  const builds = pkg && pkg.available ? [].concat((pkg.requiredBuilds && pkg.requiredBuilds.length ? pkg.requiredBuilds : null) || requiredBuildsOf(pkg.manifest)) : [];
+  const requiredBuild = builds.length ? builds.join(' or ') : null;
+  const osOk = requiredBuild ? builds.includes(studio.os.build) : need ? studio.os.major >= need : true;
   items.push(item('macOS', `${studio.os.version} (${studio.os.build})`, osOk ? 'ok' : 'fail',
     requiredBuild ? `This package requires macOS build ${requiredBuild}.` : need && !osOk ? `This driver build is linked against the macOS ${need} kernel and cannot load on ${studio.os.version}.` : need ? `Driver build requires macOS ${need} or later.` : null));
   items.push(item('Mac', `${studio.chip.brand || studio.chip.arch}${studio.chip.memoryGiB ? ` · ${studio.chip.memoryGiB} GB` : ''}`, studio.appleSilicon ? 'ok' : 'fail', studio.appleSilicon ? null : 'MCDMA needs an Apple silicon Mac.'));

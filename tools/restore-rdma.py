@@ -60,8 +60,8 @@ def main(argv=None):
     if platform.system() != 'Darwin' or os.geteuid() != 0:
         parser.error('Run on the target Mac with sudo, or use --dry-run')
     build = subprocess.check_output(['/usr/bin/sw_vers', '-buildVersion'], text=True).strip()
-    if build != '26A428':
-        parser.error('This setup procedure is validated only for build 26A428')
+    if build not in ('26A428', '26B5101f'):  # keep in step with include/apple_build_ids.h
+        parser.error('This setup procedure is validated only for builds 26A428 and 26B5101f')
     loaded = subprocess.check_output(['/usr/bin/kmutil', 'showloaded', '--list-only', '--variant-suffix', 'release'], text=True)
     if not re.search(r'org\.mcdma\.cx5\.native\s+\(0\.1\.18\)', loaded):
         parser.error('Expected the 0.1.18 native driver to be loaded')

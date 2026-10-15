@@ -5,6 +5,15 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Exact macOS builds a package may install on. macos_builds lists every audited
+// build; macos_build is the single build older manifests and CLIs understand.
+function requiredBuilds(requires) {
+  if (!requires) return [];
+  const builds = Array.isArray(requires.macos_builds) ? requires.macos_builds : requires.macos_build ? [requires.macos_build] : [];
+  if (!builds.every((b) => typeof b === 'string' && /^[0-9]{2}[A-Z][0-9]{1,5}[a-z]?$/.test(b))) throw new Error('Invalid macOS build requirement');
+  return builds;
+}
+
 function readManifest(dir) {
   try {
     const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
@@ -14,6 +23,7 @@ function readManifest(dir) {
     return {
       available: true, dir, archive, manifest: m, version: m.version || null, uuid: m.uuid || null,
       requiresMacOSMajor: m.requires && m.requires.macos_major ? Number(m.requires.macos_major) : null,
+      requiredBuilds: requiredBuilds(m.requires),
       tools: m.tools || {}, sparkTools: m.spark_tools || {}, built: m.built || null
     };
   } catch (e) { return { available: false, dir, error: fs.existsSync(dir) ? 'no manifest.json in this folder' : 'folder not found' }; }
@@ -40,4 +50,4 @@ function sha256(file) {
   });
 }
 
-module.exports = { locate, readManifest, sha256 };
+module.exports = { locate, readManifest, requiredBuilds, sha256 };

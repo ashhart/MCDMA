@@ -114,6 +114,13 @@ test('status rejects a package linked for a different macOS build', () => {
   f.info.os.build='26A999';assert.equal(check().status,'fail');
 });
 
+test('status accepts every audited build a package lists, and only those', () => {
+  const f=fixture();
+  const check=()=>checks.build({studio:f.info,macs:f.macs,sparks:f.sparks,topology:f.topo,pkg:{available:true,version:'0.1.18',requiredBuilds:['26A428','26B5101f'],manifest:{requires:{macos_build:'26A428',macos_builds:['26A428','26B5101f']}}}}).steps.find(s=>s.id==='system');
+  for (const build of ['26A428','26B5101f']) { f.info.os.build=build; assert.notEqual(check().status,'fail'); }
+  for (const build of ['26B5101','26B5101g','26A999']) { f.info.os.build=build; assert.equal(check().status,'fail'); }
+});
+
 
 test('privileged scripts live in a private unpredictable directory and are removed on failure', async () => {
   let directory;

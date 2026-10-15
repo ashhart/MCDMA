@@ -10,7 +10,8 @@ esac
 mode=$1
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_dir"
-[ "$(/usr/bin/sw_vers -buildVersion)" = 26A428 ]
+# Keep in step with include/apple_build_ids.h.
+case "$(/usr/bin/sw_vers -buildVersion)" in 26A428|26B5101f) ;; *) exit 1 ;; esac
 [ -d local/install/MCDMACX5Native.kext ]
 [ -f build/libmcdma-rdmav34.so ]
 /usr/bin/codesign --verify --strict local/install/MCDMACX5Native.kext

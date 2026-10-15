@@ -32,6 +32,7 @@ async function installDriver({ pkg }) {
   const installed = probe.out.trim() === 'absent' ? null : probe.out.trim();
   const decision = installDecision(installed, pkg.version);
   if (!decision.allowed) return { ok: false, message: decision.reason };
+  const builds = pkg.requiredBuilds && pkg.requiredBuilds.length ? pkg.requiredBuilds : ['26A428'];
   const script = `
 set -e
 # Recheck after administrator authentication, before changing any installed files.
@@ -39,7 +40,7 @@ current=absent
 if [ -d ${q(KEXT_PATH)} ]; then current=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' ${q(KEXT_PATH + '/Contents/Info.plist')}); fi
 [ "$current" = ${q(installed || 'absent')} ] || { echo 'Installed driver changed during approval; run the check again'; exit 3; }
 [ "$(/usr/bin/shasum -a 256 ${q(pkg.archive)} | /usr/bin/cut -d ' ' -f1)" = ${q(manifest.archive_sha256)} ] || { echo 'Archive changed during approval'; exit 3; }
-[ "$(/usr/bin/sw_vers -buildVersion)" = '26A428' ] || { echo 'This development package requires macOS build 26A428'; exit 3; }
+case "$(/usr/bin/sw_vers -buildVersion)" in ${builds.join('|')}) ;; *) echo ${q(`This development package requires macOS build ${builds.join(' or ')}`)}; exit 3 ;; esac
 log() { echo "[install] $*"; }
 stage=$(mktemp -d /tmp/mcdma-install.XXXXXX)
 trap 'rm -rf "$stage"' EXIT

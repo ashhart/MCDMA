@@ -80,7 +80,8 @@ import hashlib,json,sys
 from pathlib import Path
 root=Path(sys.argv[1]); path=Path(sys.argv[2]); m=json.loads(path.read_text())
 m['files']={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
-m['requires']['macos_build']='26A428'
+m['requires']['macos_build']='26A428'  # read by CLIs without macos_builds
+m['requires']['macos_builds']=['26A428','26B5101f']  # keep in step with include/apple_build_ids.h
 path.write_text(json.dumps(m,indent=2)+'\n')
 PYJSON
 echo "· wrote $out/$archive and manifest.json (driver $version, UUID $uuid)"

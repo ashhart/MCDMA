@@ -28,7 +28,7 @@ An agent with terminal and SSH access can build software, prepare configuration,
 | Item | Tested hardware | Quantity for two Sparks |
 |---|---|---:|
 | Mac | M3 Ultra Mac Studio, 256 GB unified memory | 1 |
-| macOS | macOS 27, exact validated build `26A428` | 1 installation |
+| macOS | macOS 27, exact validated build `26A428`, or 27.2 beta `26B5101f` ([interface comparison](build-26B5101f.md)) | 1 installation |
 | PCIe enclosure | OWC Mercury Helios 5S ([Amazon affiliate link](https://link.amazon/B04jjctoS)), externally powered | 1 |
 | Host cable | Thunderbolt 5 cable between Studio and Helios | 1 |
 | Network card | Mellanox ConnectX-5 Ex **MCX516A-CDAT**, PCI ID `15b3:1019`, dual QSFP28 | 1 |

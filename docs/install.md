@@ -23,7 +23,7 @@ Affiliate disclosure: I may earn a commission from purchases made through these 
 
 The wider lab has two Sparks, but the published latency figures cover one directly connected Spark and the Studio. A second Spark is not needed for this setup. QSFP28 is the cable connector, not SFP28. The NIC's nominal port rate is not a claim of measured Thunderbolt throughput or two-port scaling: the driver's PCIe-path readout shows the Thunderbolt 5 tunnel as PCIe Gen4 x4 with a 128-byte maximum payload on every hop, and both ports share that host path. The [17 September report](validation-2026-09-17.md) records about 50.6 Gbit/s into Studio memory and 29.4 Gbit/s out with Studio-initiated READ/WRITE, plus bounded concurrent-port checks.
 
-The source accepts exact builds `26A428` and the earlier inspected beta `26A5425a`; this guide and restore helper target `26A428`. An arbitrary macOS 27 build is not sufficient. Check `sw_vers -buildVersion`, and do not remove the build guard to force an unsupported version to load.
+The source accepts exact builds `26A428`, the earlier inspected beta `26A5425a` and the 27.2 beta `26B5101f` ([interface comparison](build-26B5101f.md)); this guide and restore helper target `26A428` and `26B5101f`. An arbitrary macOS 27 build is not sufficient. Check `sw_vers -buildVersion`, and do not remove the build guard to force an unsupported version to load.
 
 Apple's built-in AppleEthernetMLX5 Ethernet driver and Apple's Thunderbolt RDMA enablement are separate from this native CX5 RDMA provider. MCDMA takes ownership of the selected CX5 PCI functions. Its `mcrdmaN` interfaces hold RDMA addressing; they do not provide ordinary IP packet transmission, ping or TCP networking. Use Wi-Fi or another Ethernet interface for management.
 
