@@ -8,8 +8,8 @@
     },
     {
       "name": "include/cx5_device.h",
-      "source": "#pragma once\n#include <stdint.h>\n\n/* Shared by attachment, verbs discovery and the standalone acceptance client. */\nstatic inline int mcdma_supported_device(uint32_t vendor, uint32_t device) {\n    return vendor == 0x15b3 && (device == 0x1019 || device == 0x1015);\n}\n\nstatic inline int mcdma_native_peer(uint32_t vendor, uint32_t device, unsigned link_layer) {\n    return mcdma_supported_device(vendor, device) && link_layer == 2;\n}\n",
-      "sha256": "234d88efe621cfe18ce33b8a259303578bcf60fce0667082c552aa277c5ed3f6"
+      "source": "#pragma once\n#include <stdint.h>\n\n/* Shared by attachment, verbs discovery and the standalone acceptance client. */\nstatic inline int mcdma_supported_device(uint32_t vendor, uint32_t device) {\n    return vendor == 0x15b3 && (device == 0x1019 || device == 0x1017 || device == 0x1015);\n}\n\nstatic inline int mcdma_native_peer(uint32_t vendor, uint32_t device, unsigned link_layer) {\n    return mcdma_supported_device(vendor, device) && link_layer == 2;\n}\n",
+      "sha256": "9dd0a620b2109ac291de921a86ccdcda78c80d57fce4025b165fc7b853b6603a"
     }
   ],
   "license": "Apache-2.0",
