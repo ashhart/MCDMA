@@ -41,7 +41,10 @@ int main(void) {
     const char *port = thunderbolt + 5;
     int ok = !via_check(port, &tb) && via_check("lo0", &tb) && !via_check(port, &cx5) && via_check("lo0", &cx5);
     printf("verbs_smoke: the exchange %s Thunderbolt-only on %s\n", ok ? "is" : "is NOT", port);
-    return ok ? 0 : 1;
+    // A ConnectX link may meet elsewhere only with its peer pinned; a Thunderbolt link never may.
+    int pinned_ok = !via_check("lo0/fe80::1", &cx5) && !via_check("lo0/192.0.2.1", &cx5) && via_check("lo0/fe80::1", &tb);
+    printf("verbs_smoke: a pinned ConnectX peer %s meet off Thunderbolt\n", pinned_ok ? "may" : "may NOT");
+    return ok && pinned_ok ? 0 : 1;
 #else
     return 0;
 #endif

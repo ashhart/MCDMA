@@ -383,7 +383,10 @@ int xchg_recv(struct xchg *x, struct xmsg *m, int timeout_ms) {
 
 int xchg_ours(const struct xchg *x, const struct xmsg *m) { return !memcmp(m->to, x->session, 16); }
 
-/* On a Mac the exchange runs only over Thunderbolt, whose RDMA devices Apple names after their ports (rdma_en2, en2). */
+/* On a Mac the exchange runs over Thunderbolt, whose RDMA devices Apple names after their ports (rdma_en2, en2).
+ * A ConnectX-5 link may also meet on another interface, such as the LAN, when the peer's address is pinned: its
+ * payload can only arrive over the CX5's own cable, so a forged datagram there can stop the link coming up but cannot
+ * reach memory. This is for peers with no Thunderbolt networking, such as a DGX Spark. */
 int via_check(const char *via, const struct ep *e) {
 #if defined(__APPLE__) && !defined(MCDMA_LINK_TEST_INTERFACES)
     char ifname[32], want[48];
@@ -399,8 +402,16 @@ int via_check(const char *via, const struct ep *e) {
     struct ibv_device **list = ibv_get_device_list(&n);
     for (int i = 0; list && i < n && !found; ++i) found = !strcmp(ibv_get_device_name(list[i]), want);
     if (list) ibv_free_device_list(list);
-    if (!found) link_log("%s is not a Thunderbolt port with RDMA enabled (no %s): the exchange runs only over Thunderbolt",
-                         ifname, want);
+    if (!found && e->kind == LINK_ROCE && pinned) {
+        link_log("%s meets on %s, not Thunderbolt, admitting only the pinned peer", e->device, via);
+        return 0;
+    }
+    if (!found && e->kind == LINK_ROCE)
+        link_log("%s is not a Thunderbolt port with RDMA enabled (no %s): give it as IFACE/PEER-ADDRESS to meet a "
+                 "ConnectX peer there", ifname, want);
+    else if (!found)
+        link_log("%s is not a Thunderbolt port with RDMA enabled (no %s): the exchange runs only over Thunderbolt",
+                 ifname, want);
     return found ? 0 : -1;
 #else
     (void)via, (void)e;

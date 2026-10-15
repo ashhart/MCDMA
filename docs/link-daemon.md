@@ -77,6 +77,21 @@ mcdma-rpcd listen worker-a rocep1s0f1 3 4096 thunderbolt0:18620 4 64
 mcdma-rpcd connect worker-a,en2,18620,rdma_mcrdma0,0,4096,4,64
 ```
 
+A peer without Thunderbolt or USB4 networking, such as a DGX Spark, can meet on another shared link, such as the LAN,
+when each end pins the other's address there. The datagrams still need a link-local source and hop limit 255, so both
+hosts must be on the same layer-2 segment:
+
+```bash
+# Linux peer: exchange on its LAN port, admitting only the Mac's link-local address there
+mcdma-rpcd listen worker-a rocep1s0f1 1 4096 enP7s7/fe80::aaaa:bbff:fecc:dddd:18620 4 64
+
+# Mac: exchange on its LAN port, pinned to the peer's link-local address there
+mcdma-rpcd connect worker-a,en0/fe80::1111:22ff:fe33:4444,18620,rdma_mcrdma0,0,4096,4,64
+```
+
+The payload still moves only over the CX5 cable. Anyone on the LAN who forges the pinned address can stop the link
+from coming up, but cannot read or write memory, since RDMA packets reach the Mac's CX5 only through that cable.
+
 Mailbox halves are whole multiples of 4 MiB up to 256 MiB, and both ends of a link must use the same sizes. Path MTU
 must not exceed the port's active MTU.
 
@@ -109,10 +124,11 @@ cable can pass, so a firewall rule is no longer needed. Each end also picks a ra
 every attempt, and messages for any other session are ignored, so a stale or replayed datagram cannot act on a live
 link. Ignored datagrams are counted and logged at most every ten seconds.
 
-On a Mac the exchange runs only over Thunderbolt: Apple names each Thunderbolt RDMA device after its port, so a
+On a Mac the exchange runs over Thunderbolt: Apple names each Thunderbolt RDMA device after its port, so a
 Thunderbolt link must give its device's own port (`rdma_en2` with `en2`), and a CX5 link a port that has an `rdma_`
-device. A daemon given any other interface refuses to start. Linux cannot check this the same way; give it the
-Thunderbolt or USB4 interface.
+device, or any interface with the peer's address pinned (`IFACE/fe80::ADDR` or `IFACE/A.B.C.D`). A daemon given any
+other interface refuses to start. Linux cannot check this the same way; give it the Thunderbolt or USB4 interface,
+or the pinned shared link.
 
 ## Metal and GPU memory
 

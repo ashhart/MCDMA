@@ -60,7 +60,8 @@ static int usage(void) {
     fprintf(stderr, "usage: mcdma-rpcd listen [--owner USER] NAME DEVICE GID_INDEX PATH_MTU VIA:PORT [REQ_MIB REP_MIB]\n"
                     "       mcdma-rpcd connect name,via,port,device,gid_index,path_mtu[,req_mib,rep_mib] ...\n"
                     "       mcdma-rpcd version\n"
-                    "VIA is a Thunderbolt IP interface, optionally /fe80::ADDR of the one peer to admit.\n");
+                    "VIA is a Thunderbolt IP interface, optionally /fe80::ADDR of the one peer to admit.\n"
+                    "A ConnectX link may also meet on another shared link, such as the LAN, with that peer pinned.\n");
     return 2;
 }
 
