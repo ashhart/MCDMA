@@ -277,6 +277,13 @@ void callbacks_and_protection() {
     assert(!provider.gid_status().live && provider.gid_status().deletes==2);
     assert(provider.install_default_gid());
     assert(provider.gid_status().live && provider.gid_status().adds==3);
+    assert(provider.sample_port(sampled) && sampled && !provider.needs_default_gid());
+    // A link flap: Apple's cache drops the default GID while the hardware port comes back up.
+    // The port must not count as active, and the poll's re-install must bring it back.
+    provider.remove_default_gid();
+    assert(provider.sample_port(sampled) && !sampled && provider.needs_default_gid());
+    assert(provider.install_default_gid() && !provider.needs_default_gid());
+    assert(provider.gid_status().live && provider.gid_status().adds==4);
     assert(provider.sample_port(sampled) && sampled);
     provider.quiesce(); assert(provider.sample_port(sampled) && !sampled);
     provider.dispatch_port_event(sampled); assert(port_event==10);

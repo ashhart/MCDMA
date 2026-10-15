@@ -159,6 +159,9 @@ void MCDMACX5Native::poll(OSObject *owner,IOTimerEventSource *timer) {
     if (!self || self->stopping_ || !self->state_) return;
     auto &s=*self->state_; bool active=false;
     if (!s.verbs.sample_port(active)) active=false;
+    // After a link flap the port is up again but its default GID is gone; re-install it, and
+    // the next poll reports the port active. Outside the provider locks, as at start.
+    if (!active && s.verbs.needs_default_gid()) s.verbs.install_default_gid();
     const auto gid=s.verbs.gid_status();
     if (gid.live!=s.gid.live || gid.adds!=s.gid.adds || gid.deletes!=s.gid.deletes) {
         s.gid=gid;
