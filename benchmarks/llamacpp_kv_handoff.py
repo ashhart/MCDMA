@@ -136,10 +136,12 @@ def complete(host, tokens, n_predict):
 def tcp_transfer(src, dst, name, dst_ip, port):
     """One TCP stream src -> dst on the link; seconds from first byte to EOF,
     measured on the receiver."""
+    ipv6 = ipaddress.ip_address(dst_ip).version == 6
+    family, bind_ip = ('AF_INET6', '::') if ipv6 else ('AF_INET', '0.0.0.0')
     recv = ('python3 -c ' + shlex.quote(
         'import socket,sys,time\n'
-        's=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n'
-        f's.bind(("0.0.0.0",{port}));s.listen(1);print("READY",flush=True)\n'
+        f's=socket.socket(socket.{family},socket.SOCK_STREAM);s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n'
+        f's.bind(("{bind_ip}",{port}));s.listen(1);print("READY",flush=True)\n'
         'c,_=s.accept();f=open(sys.argv[1],"wb");n=0;t0=None\n'
         'while True:\n'
         ' b=c.recv(1<<22)\n'

@@ -117,10 +117,10 @@ class Client:
         deadline = t0 + timeout_s
         while True:
             word = self.helper.mcdma_rpc_wait_word(done, self.seq, 1, 100_000, 50_000_000)
-            if word and (word >> 32) == self.seq:
-                return time.perf_counter() - t0, word & SEQ
             if self._load(GENERATION) != gen:
                 raise RuntimeError('link generation changed during the call')
+            if word and (word >> 32) == self.seq:
+                return time.perf_counter() - t0, word & SEQ
             if time.perf_counter() > deadline:
                 raise TimeoutError(f'no reply to sequence {self.seq}')
 

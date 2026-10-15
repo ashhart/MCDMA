@@ -253,7 +253,9 @@ def main():
     print(f'device-op call sites: {sum(co.values())} old, {sum(cn.values())} new')
     for key in sorted(set(co) | set(cn), key=str):
         if co[key] != cn[key]:
-            print(f'  call site count differs at {key[0]} disc {key[1]}: {co[key]} -> {cn[key]}')
+            problem = f'call site count differs at {key[0]} disc {key[1]}: {co[key]} -> {cn[key]}'
+            print('  ' + problem)
+            problems.append(problem)
 
     changed = []
     for name in sorted(set(fo) & set(fn)):
@@ -263,7 +265,8 @@ def main():
         body = [l for l in diff if l[:1] in '+-' and not l.startswith(('+++', '---'))]
         lines_only = all(re.match(r'[-+]mov w\d+, #0x[0-9a-f]+$', l) for l in body)
         safe = re.sub(r'[^A-Za-z0-9_.]', '_', name)[:150]
-        open(os.path.join(a.out, 'function-diffs', safe + '.diff'), 'w').write('\n'.join(diff) + '\n')
+        with open(os.path.join(a.out, 'function-diffs', safe + '.diff'), 'w') as diff_file:
+            diff_file.write('\n'.join(diff) + '\n')
         changed.append((len(body), name, lines_only))
     print(f'IORDMAFamily functions: {len(set(fo) & set(fn))} common, {len(changed)} differ, '
           f'{sum(1 for c in changed if c[2])} of those only in line-number constants')

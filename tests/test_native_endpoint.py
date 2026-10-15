@@ -1,8 +1,10 @@
 """Offline pipe-liveness tests; no SSH, RDMA, timing samples or hardware."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, call, patch
@@ -91,6 +93,43 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(endpoint.process.wait.call_args_list, [call(timeout=15), call(timeout=5)])
         endpoint.process.terminate.assert_called_once_with()
         endpoint.process.kill.assert_not_called()
+
+
+class RunnerCleanupTests(unittest.TestCase):
+    def test_cleanup_failure_still_stops_both_endpoints_and_writes_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'result.json'
+            argv = ['native_cross_host.py', '--output', str(output)]
+            for name, value in {
+                    'mac-host': 'mac.example', 'peer-host': 'peer.example',
+                    'mac-client': '/opt/client', 'peer-client': '/opt/peer',
+                    'mac-provider': '/opt/libmcdma-rdmav34.so', 'mac-checker': '/opt/checker',
+                    'mac-interface': 'mcrdma0', 'peer-interface': 'eth0',
+                    'mac-device': 'mcdma0', 'peer-device': 'mlx5_0'}.items():
+                argv.extend(['--' + name, value])
+            mac, peer = Mock(), Mock()
+            mac.host, peer.host = 'mac.example', 'peer.example'
+            # Fail protocol setup after both endpoints exist, then simulate a
+            # first endpoint that survives both bounded shutdown waits.
+            mac.line.side_effect = RuntimeError('offline setup failure')
+            mac.stop.side_effect = module.EndpointCleanupError('offline child survived shutdown')
+            peer.stop.return_value = 0
+            checks = [
+                subprocess.CompletedProcess([], 0, '', ''),
+                subprocess.CompletedProcess([], 0, 'RoCE v2\n', ''),
+                subprocess.CompletedProcess([], 0, 'eth0\n', '')]
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(module.subprocess, 'run', side_effect=checks), \
+                    patch.object(module, 'Endpoint', side_effect=[mac, peer]), \
+                    patch('builtins.print'):
+                self.assertEqual(module.main(), 1)
+            mac.stop.assert_called_once_with()
+            peer.stop.assert_called_once_with()
+            result = json.loads(output.read_text())
+            self.assertFalse(result['test_passed'])
+            self.assertIn('offline setup failure', result['errors'])
+            self.assertTrue(any('mac.example: cleanup failed: offline child survived shutdown' in error
+                                for error in result['errors']))
 
 
 if __name__ == '__main__':

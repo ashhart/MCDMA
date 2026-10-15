@@ -4,7 +4,13 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import shlex
+import socket
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('kvh', ROOT / 'benchmarks/llamacpp_kv_handoff.py')
@@ -76,6 +82,65 @@ class Misc(unittest.TestCase):
         self.assertEqual(text.count('run_bw.py'), 4)   # 3 GiB dry-run slot = 4 chunks
         self.assertIn('--payload /dev/shm/kv/kvh-8192.bin.part', text)
         self.assertIn('create_connection(("192.0.2.2",18777))', text)
+
+
+class TcpTransfer(unittest.TestCase):
+    def transfer_on_loopback(self, address, family):
+        # Run the exact generated Python programs locally, replacing only
+        # SSH, and check the received bytes rather than command strings.
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((address, 0))
+            except OSError as error:
+                if family == socket.AF_INET6:
+                    self.skipTest(f'IPv6 loopback unavailable: {error}')
+                raise
+            port = probe.getsockname()[1]
+        popen = subprocess.Popen
+        children = []
+
+        def local_receiver(argv, **kwargs):
+            if argv[0] != 'ssh':
+                return popen(argv, **kwargs)
+            child = popen([sys.executable, *shlex.split(argv[-1])[1:]], **kwargs)
+            children.append(child)
+            return child
+
+        class LocalHost(kvh.Host):
+            def sh(self, command, **kwargs):
+                result = subprocess.run([sys.executable, *shlex.split(command)[1:]],
+                                        capture_output=True, text=True, timeout=5)
+                if result.returncode:
+                    raise RuntimeError(result.stderr)
+                return result.stdout
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'dst').mkdir()
+            payload = bytes(range(256)) * 4097
+            (root / 'src' / 'slot.bin').write_bytes(payload)
+            src = LocalHost('source', 8080, str(root / 'src'), False)
+            dst = LocalHost('destination', 8080, str(root / 'dst'), False)
+            try:
+                with patch.object(kvh.subprocess, 'Popen', side_effect=local_receiver):
+                    moved, elapsed = kvh.tcp_transfer(src, dst, 'slot.bin', address, port)
+                self.assertEqual(moved, len(payload))
+                self.assertGreater(elapsed, 0)
+                self.assertEqual((root / 'dst' / 'slot.bin').read_bytes(), payload)
+            finally:
+                for child in children:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+                    if child.stdout:
+                        child.stdout.close()
+
+    def test_ipv4_receiver_transfers_every_byte(self):
+        self.transfer_on_loopback('127.0.0.1', socket.AF_INET)
+
+    def test_ipv6_receiver_transfers_every_byte(self):
+        self.transfer_on_loopback('::1', socket.AF_INET6)
 
 
 class LinkArm(unittest.TestCase):

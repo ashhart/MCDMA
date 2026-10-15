@@ -115,6 +115,19 @@ class RoundTrip(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'generation'):
             self._client(bump_generation=True).call(64, 1, timeout_s=2)
 
+    def test_matching_completion_cannot_hide_a_reconnect(self):
+        class ReconnectingHelper(FakeHelper):
+            def mcdma_rpc_wait_word(helper, addr, last, mode, spin, timeout_ns):
+                # Reconnect and a matching done word become visible in the
+                # same wait, rather than relying on thread scheduling.
+                ctypes.c_uint64.from_address(client.base + rt.GENERATION).value += 1
+                return last << 32 | 64
+
+        client = rt.Client('x', helper=ReconnectingHelper(), mailbox_path=self.path)
+        self.addCleanup(client.close)
+        with self.assertRaisesRegex(RuntimeError, 'generation'):
+            client.raw_call(rt.HEAD.pack(64, 1))
+
     def test_silent_peer_times_out(self):
         with self.assertRaises(TimeoutError):
             self._client(silent=True).call(64, 1, timeout_s=0.3)

@@ -392,7 +392,7 @@ def main():
                 code = endpoint.stop()
                 if code:
                     errors.append(f'{endpoint.host}: endpoint cleanup exit {code}')
-            except (OSError, subprocess.SubprocessError) as error:
+            except (OSError, EndpointCleanupError, subprocess.SubprocessError) as error:
                 errors.append(f'{endpoint.host}: cleanup failed: {error}')
         observed_mapping = False
         confirmed_marker = None

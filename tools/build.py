@@ -21,6 +21,7 @@ def plist(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_bytes(plistlib.dumps(data,sort_keys=False))
 if len(sys.argv)>1 and sys.argv[1]=='test':
+    run([sys.executable,'-B','tests/test_compare_apple_build.py'])
     for compiler,standard,language in [('clang','c11','c'),('clang++','c++17','c++')]:
         target=BUILD/('test-apple-build-ids-'+language)
         run([compiler,'-x',language,'-std='+standard,'-O2','-Wall','-Wextra','-Werror',
