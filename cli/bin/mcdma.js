@@ -40,6 +40,7 @@ Options
   -y, --yes       Do not ask for confirmation
   -q, --quiet     No progress lines
   --quick         Transfer test without latency sampling
+  --soft          Linux test: opt into a software transport (Soft-RoCE, siw); results are labelled
   --studio-host H Manage the Mac with the card over ssh (checks, wiring, Sparks and tests only)
   --ssh-config F  Existing private OpenSSH configuration for all remote peers
   --demo          Synthetic data, no hardware needed
@@ -51,7 +52,7 @@ Exit codes: 0 done · 1 failed · 2 usage · 3 waiting for you (approve the driv
 
 /* ---------- argv ---------- */
 const argv = process.argv.slice(2);
-const flags = { json: false, yes: false, quiet: false, quick: false, demo: false, color: process.stdout.isTTY, studioHost: null, sshConfig: null, name: null, seconds: null, output: null, settingsDir: null, bandwidth: {} };
+const flags = { json: false, yes: false, quiet: false, quick: false, soft: false, demo: false, color: process.stdout.isTTY, studioHost: null, sshConfig: null, name: null, seconds: null, output: null, settingsDir: null, bandwidth: {} };
 const words = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -59,6 +60,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '-y' || a === '--yes') flags.yes = true;
   else if (a === '-q' || a === '--quiet') flags.quiet = true;
   else if (a === '--quick') flags.quick = true;
+  else if (a === '--soft') flags.soft = true;
   else if (a === '--demo') flags.demo = true;
   else if (a === '--no-color') flags.color = false;
   else if (a === '--studio-host') flags.studioHost = argv[++i];
@@ -267,7 +269,7 @@ const commands = {
     if (sub === 'test') {
       if (!links.length) throw new Error('No Linux RDMA link selected');
       const results = [];
-      for (const l of links) results.push({ link: l.id, ...await engine.runLinuxTest({ id: l.id, latency: !flags.quick }) });
+      for (const l of links) results.push({ link: l.id, ...await engine.runLinuxTest({ id: l.id, latency: !flags.quick, soft: flags.soft }) });
       if (flags.json) jsonOut({ ok: results.every((r) => r.passed), results });
       else for (const r of results) out(`${r.link}: ${r.passed ? 'passed' : (r.errors || []).join('; ')}${r.latency ? ` · ${r.latency.a.write.median}/${r.latency.a.read.median} µs from A · ${r.latency.b.write.median}/${r.latency.b.read.median} µs from B` : ''}`);
       return results.every((r) => r.passed) ? 0 : 1;

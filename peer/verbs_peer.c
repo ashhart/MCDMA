@@ -196,6 +196,7 @@ int main(int argc,char **argv) {
     if (argc!=3 && (argc!=4 || (!stock_initiator && !stock_responder && strcmp(argv[3],"readonly") && strcmp(argv[3],"initiator") && strcmp(argv[3],"responder") && strcmp(argv[3],"resources")))) {
 #if defined(__linux__) && !defined(__APPLE__)
         fputs("Usage: verbs-peer RDMA_DEVICE GID_INDEX [readonly|initiator|responder|resources|stock-initiator|stock-responder]\n",stderr);
+        fputs("  MCDMA_SOFT_TRANSPORT=1 admits a non-Mellanox software transport for stock roles\n",stderr);
 #else
         fputs("Usage: verbs-peer RDMA_DEVICE GID_INDEX [readonly|initiator|responder|resources]\n",stderr);
 #endif
@@ -221,17 +222,24 @@ int main(int argc,char **argv) {
             fputs("Native peer must be a supported ConnectX Ethernet device\n",stderr); return 2;
         }
     }
+    /* MCDMA_SOFT_TRANSPORT=1 is an explicit opt-in that admits a non-Mellanox software
+     * transport (Soft-RoCE, siw) for the stock roles, including stock-initiator. It marks
+     * the evidence line so software-transport results stay separable from hardware. */
+    const char *soft_flag=getenv("MCDMA_SOFT_TRANSPORT");
+    const int soft_transport=soft_flag && !strcmp(soft_flag,"1");
     if (stock_initiator || stock_responder) {
         struct ibv_device_attr device={0};
         if (ibv_query_device(ctx,&device)) fail("query device");
         /* rdma-core reports Mellanox's IEEE OUI; the macOS provider reports
          * its PCI vendor ID. Both identify the intended hardware family. */
-        if (device.vendor_id!=0x02c9 && device.vendor_id!=0x15b3) {
-            fputs("Stock Linux peer requires a Mellanox/NVIDIA Ethernet RDMA device\n",stderr);
+        if (!soft_transport && device.vendor_id!=0x02c9 && device.vendor_id!=0x15b3) {
+            fputs("Stock Linux peer requires a Mellanox/NVIDIA Ethernet RDMA device "
+                  "(set MCDMA_SOFT_TRANSPORT=1 to opt into a software transport)\n",stderr);
             ibv_close_device(ctx); return 2;
         }
-        fprintf(stderr,"LINUX_PEER_CONFIG backend=stock-libibverbs vendor_id=0x%x rdma_port=%u role=%s\n",
-                device.vendor_id,rdma_port,stock_initiator ? "stock-initiator" : "stock-responder");
+        fprintf(stderr,"LINUX_PEER_CONFIG backend=stock-libibverbs%s vendor_id=0x%x rdma_port=%u role=%s\n",
+                soft_transport ? " soft_transport=1" : "",device.vendor_id,rdma_port,
+                stock_initiator ? "stock-initiator" : "stock-responder");
     }
     if (path_mtu>port.active_mtu || path_mtu>port.max_mtu) {
         fprintf(stderr,"Requested path MTU exceeds port active/max MTU (%u/%u)\n",

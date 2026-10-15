@@ -144,7 +144,10 @@ async function simulatedRun(options = {}) {
       this.side = host.alias === 'peer-a' ? 'a' : 'b'; commands.push(command);
       const role = this.side === 'a' || options.wrongBRole ? 'stock-initiator' : 'stock-responder';
       const badVendor = options.badVendor || (this.side === 'b' && options.badBVendor);
-      this.stderr = options.badMode || (this.side === 'b' && options.badBMode) ? '' : `LINUX_PEER_CONFIG backend=stock-libibverbs vendor_id=${badVendor ? '0x1234' : options.legacyVendor ? '0x15b3' : '0x2c9'} rdma_port=1 role=${role}\n`;
+      const softMarker = options.softMarker === true || (options.soft && options.softMarker !== false);
+      this.stderr = options.badMode || (this.side === 'b' && options.badBMode) ? '' : softMarker
+        ? `LINUX_PEER_CONFIG backend=stock-libibverbs soft_transport=1 vendor_id=0x0 rdma_port=1 role=${role}\n`
+        : `LINUX_PEER_CONFIG backend=stock-libibverbs vendor_id=${badVendor ? '0x1234' : options.legacyVendor ? '0x15b3' : '0x2c9'} rdma_port=1 role=${role}\n`;
       if (options.duplicateMode || (this.side === 'b' && options.duplicateBMode)) this.stderr += this.stderr;
       const measured = options.latency !== false;
       this.lines = this.side === 'a' ? [`ENDPOINT 17 91 1 4096 16384 ${options.badGid ? 'fe80::9' : 'fe80::1'}`, 'READY',
@@ -164,6 +167,7 @@ async function simulatedRun(options = {}) {
     if (options.missingNeighbours) for (const peer of peers) peer.ports[0].neighbours = [];
     const link = buildLinuxLinks({ peers })[0];
     const config = settings(); if (options.settingsChanged) config.test.payload = 1024;
+    if (options.soft) config.test.soft = true;
     const result = await runLinuxTransferTest({ link, settings: config, latency: options.latency !== false });
     return { result, commands, stopped, sent, hostCommands };
   } finally { exec.Host = originalHost; exec.Endpoint = originalEndpoint; }
@@ -185,6 +189,23 @@ test('Stock Linux test retains complete latency traces and verifies both initiat
 
 test('Quick Linux test verifies all transfers without latency samples', async () => {
   const { result } = await simulatedRun({ latency: false }); assert.equal(result.passed, true); assert.equal(result.latency, null);
+});
+
+test('Soft transport opt-in sends MCDMA_SOFT_TRANSPORT, requires the soft marker and stamps the result', async () => {
+  const { result, commands } = await simulatedRun({ soft: true });
+  assert.equal(result.passed, true, result.errors.join('; '));
+  assert.equal(result.softTransport, true); assert.equal(result.softVendorId, 0);
+  assert.equal((commands.join('\n').match(/MCDMA_SOFT_TRANSPORT=1 /g) || []).length, 2);
+  assert.match(commands[0], /MCDMA_LATENCY_PROFILE=0 MCDMA_SOFT_TRANSPORT=1 /);
+});
+
+test('A soft run refuses classic-only evidence and a normal run refuses soft-labelled evidence', async () => {
+  const classic = await simulatedRun({ soft: true, softMarker: false });
+  assert.equal(classic.result.passed, false);
+  assert.ok(classic.result.errors.some((error) => error.includes('software-transport')));
+  const softLabelled = await simulatedRun({ softMarker: true });
+  assert.equal(softLabelled.result.passed, false);
+  assert.ok(softLabelled.result.errors.some((error) => error.includes('did not confirm')));
 });
 
 test('Missing tool, wrong GID, payload mismatch, timeout, missing trace, wrong warmup and duplicate operation fail closed', async () => {

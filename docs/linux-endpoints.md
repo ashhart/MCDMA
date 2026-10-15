@@ -63,3 +63,7 @@ The public `mcdma-rpcd` link daemon already builds on Linux and macOS. A Strix a
 CUDA/Vulkan buffer APIs and the pinned native llama.cpp overlay are proposed separately in [the native GPU integration pull request](https://github.com/ashhart/MCDMA/pull/8). Their allocation, ownership and validation requirements remain distinct from this Linux endpoint feature. Resident-kernel GPU ping-pong measurements are research evidence, not an installed inference latency promise. Use the accepted CPU-submitted transport as the default and validate the real model before claiming an inference speedup.
 
 Raw JSON includes private host/device identities and retained samples. Keep settings and results outside publication candidates. Saved verification expires when endpoint, GID, boot or peer-tool identity changes.
+
+## Software transports (opt-in)
+
+`mcdma linux test [LINK] --soft` sets `MCDMA_SOFT_TRANSPORT=1` for both peers. A soft run skips the Mellanox identity check, so software transports such as Soft-RoCE (`rdma_rxe`) or siw can be verified end to end; the peer labels its `LINUX_PEER_CONFIG` evidence with `soft_transport=1` and its real vendor id, and the CLI refuses a soft run whose peers did not confirm that label. A run without `--soft` is unchanged and still requires Mellanox hardware. Soft transports are for bring-up, correctness and baselines; keep their numbers separate from hardware results.

@@ -25,10 +25,10 @@ class LinuxPeerTests(unittest.TestCase):
         stub = stub.replace('#include <infiniband/verbs.h>', '#include <infiniband/verbs.h>\n#include <errno.h>', 1)
         if 'getenv("STUB_FAIL_DESTROY_QP")' not in stub:
             stub = stub.replace('q->destroyed = 1;',
-                                'if (getenv("STUB_FAIL_DESTROY_QP")) return EBUSY; q->destroyed = 1;')
+                                'if (getenv("STUB_FAIL_DESTROY_QP")) return EBUSY;\n    q->destroyed = 1;')
         if 'getenv("STUB_FAIL_DESTROY_CQ")' not in stub:
             stub = stub.replace('c->destroyed = 1;',
-                                'if (getenv("STUB_FAIL_DESTROY_CQ")) return EBUSY; c->destroyed = 1;')
+                                'if (getenv("STUB_FAIL_DESTROY_CQ")) return EBUSY;\n    c->destroyed = 1;')
         old_deregister = 'int ibv_dereg_mr(struct ibv_mr *m) { free(m); return 0; }'
         if old_deregister in stub:
             stub = stub.replace(old_deregister,
@@ -125,6 +125,18 @@ void mcdma_test_free(void *memory) {
         done = self.run_peer(['stub0', '0', 'stock-initiator'], {'STUB_LEGACY_PCI_VENDOR': '1'})
         self.assertIn('ENDPOINT ', done.stdout)
         self.assertIn('vendor_id=0x15b3 rdma_port=1 role=stock-initiator', done.stderr)
+
+    def test_soft_opt_in_admits_other_vendor_and_labels_the_evidence_line(self):
+        done = self.run_peer(['stub0', '0', 'stock-initiator'],
+                             {'STUB_OTHER_VENDOR': '1', 'MCDMA_SOFT_TRANSPORT': '1'})
+        self.assertIn('ENDPOINT ', done.stdout)
+        self.assertIn('soft_transport=1 vendor_id=0x1234 rdma_port=1 role=stock-initiator', done.stderr)
+
+    def test_soft_opt_in_alone_does_not_change_the_default_hardware_gate(self):
+        done = self.run_peer(['stub0', '0', 'stock-responder'], {'STUB_OTHER_VENDOR': '1'})
+        self.assertEqual(done.returncode, 2)
+        self.assertIn('MCDMA_SOFT_TRANSPORT=1', done.stderr)
+        self.assertNotIn('ENDPOINT ', done.stdout)
 
     def test_stock_responder_checks_hardware_without_changing_the_original_native_guard(self):
         accepted = self.run_peer(['stub0', '0', 'stock-responder'])

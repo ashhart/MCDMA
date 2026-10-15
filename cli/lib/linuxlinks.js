@@ -183,6 +183,8 @@ async function runLinuxTransferTest({ link, settings, onProgress = () => {}, lat
     if (!link || link.type !== 'linux' || !link.status.aGid || !link.status.bGid || !link.status.portsActive || !link.identity)
       throw new Error('Select a Linux RDMA link with active ports and observed link-local RoCE v2 GIDs');
     const config = settings.test || {};
+    const soft = config.soft === true;
+    result.softTransport = soft;
     if (![1024, 4096].includes(config.payload) || ![1024, 4096].includes(config.mtu) ||
         (latency && config.iterations !== undefined && config.iterations !== 1000)) throw new Error('Linux tests require 1 KiB/4 KiB payload, MTU 1024/4096 and exactly 1000 latency samples');
     if (linuxLinkIdentity(link.a, link.b, config) !== link.identity) throw new Error('Linux test settings changed since discovery; refresh before testing');
@@ -196,7 +198,7 @@ async function runLinuxTransferTest({ link, settings, onProgress = () => {}, lat
     }
     const command = (side) => {
       const end = link[side];
-      return `exec env -u IBV_DRIVERS -u MCDMA_CQ_MAP -u MCDMA_USER_POST -u MCDMA_USER_BF MCDMA_PAYLOAD_BYTES=${config.payload} MCDMA_PATH_MTU=${config.mtu} MCDMA_RDMA_PORT=${end.rdmaPort} MCDMA_LATENCY_PROFILE=0 ${q(result.tools[side].path)} ${q(end.rdmaDevice)} ${end.gidIndex} ${side === 'a' ? 'stock-initiator' : 'stock-responder'}`;
+      return `exec env -u IBV_DRIVERS -u MCDMA_CQ_MAP -u MCDMA_USER_POST -u MCDMA_USER_BF MCDMA_PAYLOAD_BYTES=${config.payload} MCDMA_PATH_MTU=${config.mtu} MCDMA_RDMA_PORT=${end.rdmaPort} MCDMA_LATENCY_PROFILE=0${soft ? ' MCDMA_SOFT_TRANSPORT=1' : ''} ${q(result.tools[side].path)} ${q(end.rdmaDevice)} ${end.gidIndex} ${side === 'a' ? 'stock-initiator' : 'stock-responder'}`;
     };
     for (const side of ['a', 'b']) { note(`Starting stock Linux verbs on ${link[side].node}`); endpoints.push(new exec.Endpoint(hosts[side], command(side))); }
     const [a, b] = endpoints;
@@ -220,8 +222,12 @@ async function runLinuxTransferTest({ link, settings, onProgress = () => {}, lat
     if (await a.line(20000) !== `NATIVE_REVERSE verified=${p}`) throw new Error('First Linux endpoint did not verify the reverse payload');
     for (const [side, process, role] of [['a', a, 'stock-initiator'], ['b', b, 'stock-responder']]) {
       const markers = (process.stderr || '').split(/\r?\n/).filter((line) => line.startsWith('LINUX_PEER_CONFIG '));
-      const marker = new RegExp(`^LINUX_PEER_CONFIG backend=stock-libibverbs vendor_id=(0x2c9|0x15b3) rdma_port=${link[side].rdmaPort} role=${role}$`);
-      if (markers.length !== 1 || !marker.test(markers[0])) throw new Error(`${side}: Linux peer did not confirm the ${role} mode`);
+      // A soft run requires the peer's soft_transport evidence with its real vendor id; a
+      // normal run still requires Mellanox hardware. An unlabelled marker never passes as soft.
+      const marker = new RegExp(`^LINUX_PEER_CONFIG backend=stock-libibverbs${soft ? ' soft_transport=1 vendor_id=(0x[0-9a-f]+)' : ' vendor_id=(0x2c9|0x15b3)'} rdma_port=${link[side].rdmaPort} role=${role}$`);
+      const matched = markers.length === 1 ? marker.exec(markers[0]) : null;
+      if (!matched) throw new Error(`${side}: Linux peer did not confirm the ${role}${soft ? ' software-transport' : ''} mode`);
+      if (soft) result.softVendorId = parseInt(matched[1], 16);
     }
     if (latency && !['a', 'b'].every((side) => measured[side].write && measured[side].read)) throw new Error('Incomplete Linux latency summaries');
     result.latency = latency ? measured : null;

@@ -196,7 +196,7 @@ class Engine extends EventEmitter {
     return this.state.topology.linuxLinks.find((l) => l.id === id);
   }
 
-  async runLinuxTest({ id, latency = true }) {
+  async runLinuxTest({ id, latency = true, soft = false }) {
     if (this.state.busy.test) return { passed: false, errors: ['a test is already running'] };
     const link = (this.state.topology && this.state.topology.linuxLinks || []).find((l) => l.id === id);
     if (!link) return { passed: false, errors: ['no such Linux RDMA link'] };
@@ -204,7 +204,8 @@ class Engine extends EventEmitter {
     this.state.busy.test = id; this.publish();
     let result;
     try {
-      result = await linuxlinks.runLinuxTransferTest({ link, settings: this.store.get(), latency, onProgress: (m) => this.progress('linux-test', m) });
+      const store = this.store.get();
+      result = await linuxlinks.runLinuxTransferTest({ link, settings: soft ? { ...store, test: { ...store.test, soft: true } } : store, latency, onProgress: (m) => this.progress('linux-test', m) });
       result.identity = link.identity;
       this.persist({ lastLinuxTests: { ...this.store.get().lastLinuxTests, [id]: result } });
     } catch (e) { result = { passed: false, errors: [e.message] }; }
