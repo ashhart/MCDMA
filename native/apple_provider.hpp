@@ -33,6 +33,10 @@ public:
     // invokes add_gid synchronously while installing its default GID.
     bool install_default_gid();
     void remove_default_gid();
+    // True when the hardware port is up but Apple's cache has dropped the default GID, as it
+    // does when the link goes down. The port only counts as active once that GID is live, so
+    // the poll re-installs it; nothing else would.
+    bool needs_default_gid();
     // Samples port health on the command lock only, so a slow or failing
     // firmware query cannot delay post/poll on the data-path lock.
     bool sample_port(bool &active);

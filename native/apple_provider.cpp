@@ -227,6 +227,10 @@ bool AppleProvider::install_default_gid() {
     ib_cache_gid_set_default_gid(device_,1,network_,uint64_t(1)<<2,0);
     Guard guard(this); return gid_live_;
 }
+bool AppleProvider::needs_default_gid() {
+    Guard guard(this);
+    return ready() && network_ && port_valid_ && port_active_ && !gid_live_;
+}
 void AppleProvider::remove_default_gid() {
     if (device_ && network_) ib_cache_gid_set_default_gid(device_,1,network_,uint64_t(1)<<2,1);
 }
