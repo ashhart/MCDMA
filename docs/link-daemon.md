@@ -112,7 +112,9 @@ Before this release a listen daemon took control connections on a TCP port, and 
 write into its mailbox, so it had to be bound to one address and firewalled. The exchange that replaced it admits a
 datagram only when all of these hold:
 
-1. It arrived on the named interface.
+1. It arrived on the named interface. The socket is bound to that interface (`IPV6_BOUND_IF` on a Mac,
+   `SO_BINDTODEVICE` on Linux), so it never listens on another; a Linux kernel before 5.7 refuses that bind to an
+   unprivileged process, and the exchange then logs it and checks each datagram's interface instead.
 2. It came from an IPv6 link-local address, which no router forwards.
 3. Its hop limit is 255. Both ends send with 255, and any router on the way would have lowered it, the same check
    IPv6 neighbor discovery makes.

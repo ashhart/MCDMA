@@ -141,6 +141,23 @@ static struct sockaddr_in v4_peer(const struct xchg *x, int port) {
     return to;
 }
 
+#if !defined(IP_BOUND_IF) || !defined(IPV6_BOUND_IF)
+/* Linux: the socket bound to the interface (SO_BINDTODEVICE), so it listens on no other. Unprivileged since Linux 5.7;
+ * an older kernel refuses it without CAP_NET_RAW, and the socket then takes every interface's datagrams and admits
+ * only this one's, as before. 0 when the socket cannot be used. */
+static int bind_device(const struct xchg *x, int fd) {
+#ifdef SO_BINDTODEVICE
+    if (!setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, x->ifname, (socklen_t)strlen(x->ifname))) return 1;
+    if (errno != EPERM) return 0;
+    link_log("exchange socket not bound to %s (this kernel needs CAP_NET_RAW for it); admitting only its datagrams",
+             x->ifname);
+#else
+    (void)x, (void)fd;
+#endif
+    return 1;
+}
+#endif
+
 /* IPv4: a socket bound to the interface where it can be, sending with TTL 255 and reporting each datagram's
  * interface and TTL, so only the pinned peer one hop away on this link is admitted, as on IPv6. */
 static int open_v4(struct xchg *x, int port) {
@@ -154,6 +171,7 @@ static int open_v4(struct xchg *x, int port) {
     ok = ok && !setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &idx, sizeof(idx));
 #else
     (void)idx;
+    ok = ok && bind_device(x, fd);
 #endif
     struct sockaddr_in a;
     memset(&a, 0, sizeof(a));
@@ -208,6 +226,8 @@ int xchg_open(struct xchg *x, const char *via, int port, int peer_port, const ch
              !setsockopt(fd, IPPROTO_IPV6, IPV6_MULTICAST_IF, &idx, sizeof(idx));
 #ifdef IPV6_BOUND_IF
     ok = ok && !setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, sizeof(idx));
+#else
+    ok = ok && bind_device(x, fd);
 #endif
     struct sockaddr_in6 a;
     memset(&a, 0, sizeof(a));

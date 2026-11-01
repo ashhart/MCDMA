@@ -179,9 +179,28 @@ static void admission(const char *lo) {
     xchg_close(&listen), xchg_close(&conn), xchg_close(&pinned_other);
 }
 
+/* The socket listens on its interface alone: bound to it, not only filtering what arrives there. */
+static void bound(const char *ifname) {
+    struct xchg x;
+    check(!xchg_open(&x, ifname, 0, 0, "worker-a"), "an exchange opens on the loopback");
+#if defined(IPV6_BOUND_IF)
+    unsigned idx = 0;
+    socklen_t len = sizeof(idx);
+    check(!getsockopt(x.fd, IPPROTO_IPV6, IPV6_BOUND_IF, &idx, &len) && idx == if_nametoindex(ifname),
+          "the exchange socket is bound to its interface");
+#elif defined(SO_BINDTODEVICE)
+    char dev[IF_NAMESIZE + 1] = {0};
+    socklen_t len = sizeof(dev);
+    check(!getsockopt(x.fd, SOL_SOCKET, SO_BINDTODEVICE, dev, &len) && !strcmp(dev, ifname),
+          "the exchange socket is bound to its interface");
+#endif
+    xchg_close(&x);
+}
+
 int main(void) {
     codec();
     parsing();
+    bound(if_nametoindex("lo0") ? "lo0" : "lo");
     const char *lo = loopback();
     if (lo) admission(lo);
     else puts("test_link_xchg: no link-local loopback address; admission checks skipped");
