@@ -74,6 +74,9 @@ if len(sys.argv)>1 and sys.argv[1]=='test':
     run(['clang','-std=c11','-O2','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
          'tests/test_rpcd_socket.c','rpc/rpcd_common.c','-o',BUILD/'test-rpcd-socket'])
     run([BUILD/'test-rpcd-socket'])
+    run(['clang','-std=c11','-O2','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
+         'tests/test_rpcd_hosts.c','rpc/rpcd_common.c','-o',BUILD/'test-rpcd-hosts'])
+    run([BUILD/'test-rpcd-hosts'])
     run([sys.executable,'-B','tests/test_rpcd_daemon.py'])
     # Link layer: the Thunderbolt-only exchange, Thunderbolt placement, the daemon over Thunderbolt, libmcdma-fabric.
     run([sys.executable,'-B','tests/test_link.py'])

@@ -34,14 +34,15 @@ struct listen_state {
 };
 
 static void listen_status(struct listen_state *s, int fd) {
-    char out[512];
+    char out[512], host[80];
     snprintf(out, sizeof(out), "VERSION mcdma-rpcd %d %s", PROTOCOL, RELEASE);
     send_line(fd, out);
+    host_field(s->name, host, sizeof(host));
     snprintf(out, sizeof(out),
              "PEER %s %s calls %" PRIu64 " failures %" PRIu64 " MiB %" PRIu64
-             " device=%s link=%s via=%s port=%d req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld service=%s",
+             " device=%s link=%s%s via=%s port=%d req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld service=%s",
              s->name, s->armed ? "up" : "down", s->served, s->failures, s->bytes >> 20, s->e.device,
-             link_kind_name(s->e.kind), s->x.ifname, s->x.port, s->b.req >> 20, s->b.rep >> 20,
+             link_kind_name(s->e.kind), host, s->x.ifname, s->x.port, s->b.req >> 20, s->b.rep >> 20,
              s->armed ? s->since : 0, s->svc >= 0 ? "attached" : "none");
     send_line(fd, out);
     send_line(fd, "END");
@@ -187,6 +188,11 @@ int run_listen(const char *name, const char *device, int gid_index, int mtu, con
     snprintf(box_path, sizeof(box_path), "/mcdma-rpc.%s", name);
 #endif
     const char *sock_path = socket_path(default_sock);
+    char host[64];
+    if (link_host(name, host, sizeof(host)) < 0) {
+        logf_("MCDMA_RPCD_HOSTS must be NAME=HOST[,NAME=HOST]");
+        return 2;
+    }
     /* the lock comes first: a second daemon for this link must leave the live mailbox alone */
     if (hold_link_lock(name, MCDMA_RPC_LISTEN_LOCK) < 0) return 2;
     if (socket_in_use(sock_path)) {

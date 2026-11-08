@@ -22,7 +22,9 @@
  * There is no TCP anywhere: the exchange is a few hundred bytes of IPv6 link-local datagrams on the Thunderbolt
  * cable, and every payload byte moves by RDMA. MCDMA_RPCD_SOCKET replaces the Unix socket path. Mailboxes and
  * sockets are owner-only: run the daemon as the user whose applications use it. NAME is 1-20 characters of
- * [A-Za-z0-9_-]. docs/link-daemon.md describes the mailbox (protocol 1), the exchange and both link kinds.
+ * [A-Za-z0-9_-]. MCDMA_RPCD_HOSTS="NAME=HOST[,NAME=HOST]" labels links with the name applications know the peer
+ * by, which STATUS reports as host=. docs/link-daemon.md describes the mailbox (protocol 1), the exchange and both
+ * link kinds.
  *
  * Safety. The connect end takes its queue pairs past INIT only after the listen end has answered from RTS, posts
  * nothing before its own RTS, gives up on a peer by destroying its queue pairs inside a live process (never by
@@ -61,7 +63,8 @@ static int usage(void) {
                     "       mcdma-rpcd connect name,via,port,device,gid_index,path_mtu[,req_mib,rep_mib] ...\n"
                     "       mcdma-rpcd version\n"
                     "VIA is a Thunderbolt IP interface, optionally /fe80::ADDR of the one peer to admit.\n"
-                    "A ConnectX link may also meet on another shared link, such as the LAN, with that peer pinned.\n");
+                    "A ConnectX link may also meet on another shared link, such as the LAN, with that peer pinned.\n"
+                    "MCDMA_RPCD_HOSTS=NAME=HOST[,NAME=HOST] names each link's peer for STATUS (host=).\n");
     return 2;
 }
 

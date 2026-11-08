@@ -62,11 +62,14 @@ $(OUT)/mesh-check: mesh_check.c libmcdma_fabric.c fabric_bond_n.h fabric_open_qp
 $(OUT)/metal-poll: metal_poll.m $(LINK) link.h | $(OUT)
 	$(CC) $(CFLAGS) -fobjc-arc -o $@ metal_poll.m $(LINK) -framework Metal -framework Foundation $(VERBS) -lpthread
 
-test: ../tests/test_rpc_helper.c ../tests/test_rpcd_socket.c libmcdma_rpc.c mcdma_rpc.h rpcd_common.c rpcd.h | $(OUT)
+test: ../tests/test_rpc_helper.c ../tests/test_rpcd_socket.c ../tests/test_rpcd_hosts.c libmcdma_rpc.c mcdma_rpc.h \
+      rpcd_common.c rpcd.h | $(OUT)
 	$(CC) $(CFLAGS) -o $(OUT)/test-rpc-helper ../tests/test_rpc_helper.c libmcdma_rpc.c $(HELPER_EXTRA) -lpthread
 	$(OUT)/test-rpc-helper
 	$(CC) $(CFLAGS) -o $(OUT)/test-rpcd-socket ../tests/test_rpcd_socket.c rpcd_common.c
 	$(OUT)/test-rpcd-socket
+	$(CC) $(CFLAGS) -o $(OUT)/test-rpcd-hosts ../tests/test_rpcd_hosts.c rpcd_common.c
+	$(OUT)/test-rpcd-hosts
 	cd .. && python3 -B tests/test_rpcd_daemon.py
 	cd .. && python3 -B tests/test_link.py
 	$(MAKE) -C gpu test

@@ -84,6 +84,44 @@ int valid_name(const char *name) {
     return 1;
 }
 
+/* The HOST that MCDMA_RPCD_HOSTS="NAME=HOST[,NAME=HOST]" gives link `name`: the name an application knows the peer
+ * by, which STATUS reports as host= (oMLX ties a link to an enrolled worker through it). The exchange never needs
+ * one. 1 and the host in `out`, 0 when the link has no label, -1 when the variable is malformed: an entry without
+ * NAME=HOST, a NAME that is not a link name, an empty HOST or one over 63 characters, or a HOST with whitespace. */
+int link_host(const char *name, char *out, size_t n) {
+    const char *env = getenv("MCDMA_RPCD_HOSTS");
+    int found = 0;
+    if (out && n) *out = 0;
+    for (const char *at = env; at && *at;) {
+        const char *end = strchr(at, ',');
+        size_t entry = end ? (size_t)(end - at) : strlen(at);
+        const char *eq = memchr(at, '=', entry);
+        char label[21];
+        if (!eq || (size_t)(eq - at) >= sizeof(label)) return -1;
+        memcpy(label, at, (size_t)(eq - at));
+        label[eq - at] = 0;
+        const char *host = eq + 1;
+        size_t len = entry - (size_t)(eq - at) - 1;
+        if (!valid_name(label) || !len || len > 63) return -1;
+        for (size_t i = 0; i < len; ++i)
+            if ((unsigned char)host[i] <= ' ' || host[i] == 127) return -1;
+        if (!found && !strcmp(label, name)) {
+            if (out && n) snprintf(out, n, "%.*s", (int)len, host);
+            found = 1;
+        }
+        if (end && !end[1]) return -1;   /* a trailing comma */
+        at = end ? end + 1 : at + entry;
+    }
+    return found;
+}
+
+/* " host=HOST" for a STATUS line, or "" for a link with no label. */
+void host_field(const char *name, char *out, size_t n) {
+    char host[64];
+    if (n) *out = 0;
+    if (link_host(name, host, sizeof(host)) > 0) snprintf(out, n, " host=%s", host);
+}
+
 int parse_mib(unsigned mib, uint64_t *out) {
     if (!mib || mib % 4 || mib > 4 * MAX_SEGS) return -1;
     *out = (uint64_t)mib << 20;

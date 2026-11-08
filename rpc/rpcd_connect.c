@@ -291,18 +291,19 @@ static int parse_peer(const char *spec, struct peer *p) {
 }
 
 static void connect_status(int fd) {
-    char out[512];
+    char out[512], host[80];
     snprintf(out, sizeof(out), "VERSION mcdma-rpcd %d %s", PROTOCOL, RELEASE);
     send_line(fd, out);
     for (int i = 0; i < g_npeers; ++i) {
         struct peer *p = &g_peers[i];
         int up = __atomic_load_n(&p->up, __ATOMIC_ACQUIRE);
+        host_field(p->name, host, sizeof(host));
         snprintf(out, sizeof(out),
                  "PEER %.*s %s calls %" PRIu64 " failures %" PRIu64 " MiB %" PRIu64
-                 " via=%.*s port=%d device=%.*s link=%s req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld",
+                 "%s via=%.*s port=%d device=%.*s link=%s req_mib=%" PRIu64 " rep_mib=%" PRIu64 " since=%lld",
                  (int)sizeof(p->name), p->name, up ? "up" : "down", __atomic_load_n(&p->calls, __ATOMIC_RELAXED),
                  __atomic_load_n(&p->failures, __ATOMIC_RELAXED), __atomic_load_n(&p->bytes, __ATOMIC_RELAXED) >> 20,
-                 (int)sizeof(p->via), p->via, p->port, (int)sizeof(p->device), p->device,
+                 host, (int)sizeof(p->via), p->via, p->port, (int)sizeof(p->device), p->device,
                  link_kind_name(p->e.kind), p->b.req >> 20, p->b.rep >> 20,
                  up ? __atomic_load_n(&p->since, __ATOMIC_RELAXED) : 0);
         send_line(fd, out);
@@ -337,6 +338,11 @@ int run_connect(int npeers, char **specs, int direct) {
                 logf_("peer name %s is used twice", g_peers[i].name);
                 return 2;
             }
+        char host[64];
+        if (link_host(g_peers[i].name, host, sizeof(host)) < 0) {
+            logf_("MCDMA_RPCD_HOSTS must be NAME=HOST[,NAME=HOST]");
+            return 2;
+        }
     }
     /* locks and the socket come before any device or mailbox, so a running daemon is never orphaned */
     for (int i = 0; i < npeers; ++i)
