@@ -153,13 +153,26 @@ printf 'SHUTDOWN\n' | nc -U /tmp/mcdma-rpcd.sock
 
 ```text
 VERSION mcdma-rpcd 1 2.0.0
-PEER NAME up|down calls N failures N MiB N via=VIA port=PORT device=DEVICE link=roce|thunderbolt req_mib=R rep_mib=P since=EPOCH
+PEER NAME up|down calls N failures N MiB N [host=HOST] via=VIA port=PORT device=DEVICE link=roce|thunderbolt req_mib=R rep_mib=P since=EPOCH
 END
 ```
 
 `since` is the time the link came up, or 0 while it is down. The listen daemon answers the same commands on
 `/tmp/mcdma-rpcd.NAME.sock`; its `PEER` line adds `service=attached|none`. `MCDMA_RPCD_SOCKET` replaces either
 socket path.
+
+`host=` names the peer as applications know it, which `via=` cannot: that holds the exchange interface and perhaps a
+link-local address. oMLX ties a daemon link to an enrolled worker through `host=` (its RDMA stage links read nothing
+else), so set `MCDMA_RPCD_HOSTS="NAME=HOST[,NAME=HOST]"` in the daemon's environment with the worker's hostname or
+address for each link:
+
+```bash
+MCDMA_RPCD_HOSTS=worker-a=spark-a.local mcdma-rpcd connect worker-a,en0/fe80::1111:22ff:fe33:4444,18620,rdma_mcrdma0,0,4096,4,64
+```
+
+A link without a label prints no `host=`. A malformed list (an entry without `NAME=HOST`, a `NAME` that is not a
+link name, an empty `HOST`, one over 63 characters or one containing whitespace) stops the daemon from starting, so a
+typo cannot silently drop a label.
 
 One daemon serves each link name. A daemon takes the lock file `/tmp/mcdma-rpc.NAME.lock` for every link before it
 touches a device or mailbox, and refuses to start while another daemon holds it or answers on its socket, so a running

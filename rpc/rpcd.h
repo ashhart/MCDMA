@@ -92,6 +92,8 @@ void set_io_timeout(int fd, int seconds);
 void logf_(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void log_rate(const char *name, const char *what, uint64_t bytes, uint64_t ns);
 int valid_name(const char *name);
+int link_host(const char *name, char *out, size_t n);
+void host_field(const char *name, char *out, size_t n);
 int parse_mib(unsigned mib, uint64_t *out);
 int send_line(int fd, const char *text);
 int take_line(struct reader *r, char *out, size_t n, int block);

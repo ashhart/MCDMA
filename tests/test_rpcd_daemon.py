@@ -140,10 +140,12 @@ class DaemonTests(unittest.TestCase):
 
     # Listen end: the daemon under test, driven over its exchange port and socket.
 
-    def start(self, name):
+    def start(self, name, hosts=None):
         port = free_port()
         sock = os.path.join(self.work, name + '.sock')
         env = dict(os.environ, MCDMA_RPCD_SOCKET=sock, STUB_NOCOPY='1')
+        if hosts is not None:
+            env['MCDMA_RPCD_HOSTS'] = hosts
         daemon = subprocess.Popen([self.daemon, 'listen', name, 'stub0', '0', '4096', f'{LO}:{port}'],
                                   stderr=subprocess.PIPE, env=env, text=True)
         self.addCleanup(stop, daemon, sock)
@@ -170,6 +172,27 @@ class DaemonTests(unittest.TestCase):
             self.assertEqual(bytes(mailbox[4096:4102]), b'MARKER')
         self.assertIsNone(live.poll())
         self.assertIn('PEER dup down', command(sock, 'STATUS'))
+
+    def test_status_names_the_peer_host_only_when_a_label_is_set(self):
+        _, _, sock, _ = self.start('plain')
+        self.assertNotIn('host=', command(sock, 'STATUS'))
+        _, port, sock, _ = self.start('named', hosts='other=x,named=spark-a.example')
+        self.assertIn('PEER named down', command(sock, 'STATUS'))
+        self.assertIn(' link=roce host=spark-a.example via=', command(sock, 'STATUS'))
+        self.peer(port, 'named').connect()
+        deadline = time.monotonic() + 2
+        while 'PEER named up' not in command(sock, 'STATUS'):
+            self.assertLess(time.monotonic(), deadline, 'the connect end never armed the link')
+            time.sleep(0.05)
+        self.assertIn(' host=spark-a.example via=', command(sock, 'STATUS'))
+
+    def test_a_malformed_host_list_refuses_to_start(self):
+        env = dict(os.environ, MCDMA_RPCD_SOCKET=os.path.join(self.work, 'badhosts.sock'), STUB_NOCOPY='1',
+                   MCDMA_RPCD_HOSTS='badhosts=spark a')
+        refused = subprocess.run([self.daemon, 'listen', 'badhosts', 'stub0', '0', '4096', f'{LO}:{free_port()}'],
+                                 capture_output=True, text=True, env=env, timeout=10)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn('MCDMA_RPCD_HOSTS must be NAME=HOST[,NAME=HOST]', refused.stderr)
 
     def test_silent_socket_clients_cannot_hold_shutdown_off(self):
         daemon, _, sock, _ = self.start('quiet')
